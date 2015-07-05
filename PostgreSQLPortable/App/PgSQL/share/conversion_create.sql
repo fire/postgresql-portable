@@ -755,37 +755,37 @@ DROP CONVERSION pg_catalog.utf8_to_uhc;
 CREATE DEFAULT CONVERSION pg_catalog.utf8_to_uhc FOR 'UTF8' TO 'UHC' FROM utf8_to_uhc;
 COMMENT ON CONVERSION pg_catalog.utf8_to_uhc IS 'conversion for UTF8 to UHC';
 -- EUC_JIS_2004 --> UTF8
-CREATE OR REPLACE FUNCTION euc_jis_2004_to_utf8 (INTEGER, INTEGER, CSTRING, INTERNAL, INTEGER) RETURNS VOID AS '$libdir/utf8_and_euc_jis_2004', 'euc_jis_2004_to_utf8' LANGUAGE C STRICT;
+CREATE OR REPLACE FUNCTION euc_jis_2004_to_utf8 (INTEGER, INTEGER, CSTRING, INTERNAL, INTEGER) RETURNS VOID AS '$libdir/utf8_and_euc2004', 'euc_jis_2004_to_utf8' LANGUAGE C STRICT;
 COMMENT ON FUNCTION euc_jis_2004_to_utf8(INTEGER, INTEGER, CSTRING, INTERNAL, INTEGER) IS 'internal conversion function for EUC_JIS_2004 to UTF8';
 DROP CONVERSION pg_catalog.euc_jis_2004_to_utf8;
 CREATE DEFAULT CONVERSION pg_catalog.euc_jis_2004_to_utf8 FOR 'EUC_JIS_2004' TO 'UTF8' FROM euc_jis_2004_to_utf8;
 COMMENT ON CONVERSION pg_catalog.euc_jis_2004_to_utf8 IS 'conversion for EUC_JIS_2004 to UTF8';
 -- UTF8 --> EUC_JIS_2004
-CREATE OR REPLACE FUNCTION utf8_to_euc_jis_2004 (INTEGER, INTEGER, CSTRING, INTERNAL, INTEGER) RETURNS VOID AS '$libdir/utf8_and_euc_jis_2004', 'utf8_to_euc_jis_2004' LANGUAGE C STRICT;
+CREATE OR REPLACE FUNCTION utf8_to_euc_jis_2004 (INTEGER, INTEGER, CSTRING, INTERNAL, INTEGER) RETURNS VOID AS '$libdir/utf8_and_euc2004', 'utf8_to_euc_jis_2004' LANGUAGE C STRICT;
 COMMENT ON FUNCTION utf8_to_euc_jis_2004(INTEGER, INTEGER, CSTRING, INTERNAL, INTEGER) IS 'internal conversion function for UTF8 to EUC_JIS_2004';
 DROP CONVERSION pg_catalog.utf8_to_euc_jis_2004;
 CREATE DEFAULT CONVERSION pg_catalog.utf8_to_euc_jis_2004 FOR 'UTF8' TO 'EUC_JIS_2004' FROM utf8_to_euc_jis_2004;
 COMMENT ON CONVERSION pg_catalog.utf8_to_euc_jis_2004 IS 'conversion for UTF8 to EUC_JIS_2004';
 -- SHIFT_JIS_2004 --> UTF8
-CREATE OR REPLACE FUNCTION shift_jis_2004_to_utf8 (INTEGER, INTEGER, CSTRING, INTERNAL, INTEGER) RETURNS VOID AS '$libdir/utf8_and_shift_jis_2004', 'shift_jis_2004_to_utf8' LANGUAGE C STRICT;
+CREATE OR REPLACE FUNCTION shift_jis_2004_to_utf8 (INTEGER, INTEGER, CSTRING, INTERNAL, INTEGER) RETURNS VOID AS '$libdir/utf8_and_sjis2004', 'shift_jis_2004_to_utf8' LANGUAGE C STRICT;
 COMMENT ON FUNCTION shift_jis_2004_to_utf8(INTEGER, INTEGER, CSTRING, INTERNAL, INTEGER) IS 'internal conversion function for SHIFT_JIS_2004 to UTF8';
 DROP CONVERSION pg_catalog.shift_jis_2004_to_utf8;
 CREATE DEFAULT CONVERSION pg_catalog.shift_jis_2004_to_utf8 FOR 'SHIFT_JIS_2004' TO 'UTF8' FROM shift_jis_2004_to_utf8;
 COMMENT ON CONVERSION pg_catalog.shift_jis_2004_to_utf8 IS 'conversion for SHIFT_JIS_2004 to UTF8';
 -- UTF8 --> SHIFT_JIS_2004
-CREATE OR REPLACE FUNCTION utf8_to_shift_jis_2004 (INTEGER, INTEGER, CSTRING, INTERNAL, INTEGER) RETURNS VOID AS '$libdir/utf8_and_shift_jis_2004', 'utf8_to_shift_jis_2004' LANGUAGE C STRICT;
+CREATE OR REPLACE FUNCTION utf8_to_shift_jis_2004 (INTEGER, INTEGER, CSTRING, INTERNAL, INTEGER) RETURNS VOID AS '$libdir/utf8_and_sjis2004', 'utf8_to_shift_jis_2004' LANGUAGE C STRICT;
 COMMENT ON FUNCTION utf8_to_shift_jis_2004(INTEGER, INTEGER, CSTRING, INTERNAL, INTEGER) IS 'internal conversion function for UTF8 to SHIFT_JIS_2004';
 DROP CONVERSION pg_catalog.utf8_to_shift_jis_2004;
 CREATE DEFAULT CONVERSION pg_catalog.utf8_to_shift_jis_2004 FOR 'UTF8' TO 'SHIFT_JIS_2004' FROM utf8_to_shift_jis_2004;
 COMMENT ON CONVERSION pg_catalog.utf8_to_shift_jis_2004 IS 'conversion for UTF8 to SHIFT_JIS_2004';
 -- EUC_JIS_2004 --> SHIFT_JIS_2004
-CREATE OR REPLACE FUNCTION euc_jis_2004_to_shift_jis_2004 (INTEGER, INTEGER, CSTRING, INTERNAL, INTEGER) RETURNS VOID AS '$libdir/euc_jis_2004_and_shift_jis_2004', 'euc_jis_2004_to_shift_jis_2004' LANGUAGE C STRICT;
+CREATE OR REPLACE FUNCTION euc_jis_2004_to_shift_jis_2004 (INTEGER, INTEGER, CSTRING, INTERNAL, INTEGER) RETURNS VOID AS '$libdir/euc2004_sjis2004', 'euc_jis_2004_to_shift_jis_2004' LANGUAGE C STRICT;
 COMMENT ON FUNCTION euc_jis_2004_to_shift_jis_2004(INTEGER, INTEGER, CSTRING, INTERNAL, INTEGER) IS 'internal conversion function for EUC_JIS_2004 to SHIFT_JIS_2004';
 DROP CONVERSION pg_catalog.euc_jis_2004_to_shift_jis_2004;
 CREATE DEFAULT CONVERSION pg_catalog.euc_jis_2004_to_shift_jis_2004 FOR 'EUC_JIS_2004' TO 'SHIFT_JIS_2004' FROM euc_jis_2004_to_shift_jis_2004;
 COMMENT ON CONVERSION pg_catalog.euc_jis_2004_to_shift_jis_2004 IS 'conversion for EUC_JIS_2004 to SHIFT_JIS_2004';
 -- SHIFT_JIS_2004 --> EUC_JIS_2004
-CREATE OR REPLACE FUNCTION shift_jis_2004_to_euc_jis_2004 (INTEGER, INTEGER, CSTRING, INTERNAL, INTEGER) RETURNS VOID AS '$libdir/euc_jis_2004_and_shift_jis_2004', 'shift_jis_2004_to_euc_jis_2004' LANGUAGE C STRICT;
+CREATE OR REPLACE FUNCTION shift_jis_2004_to_euc_jis_2004 (INTEGER, INTEGER, CSTRING, INTERNAL, INTEGER) RETURNS VOID AS '$libdir/euc2004_sjis2004', 'shift_jis_2004_to_euc_jis_2004' LANGUAGE C STRICT;
 COMMENT ON FUNCTION shift_jis_2004_to_euc_jis_2004(INTEGER, INTEGER, CSTRING, INTERNAL, INTEGER) IS 'internal conversion function for SHIFT_JIS_2004 to EUC_JIS_2004';
 DROP CONVERSION pg_catalog.shift_jis_2004_to_euc_jis_2004;
 CREATE DEFAULT CONVERSION pg_catalog.shift_jis_2004_to_euc_jis_2004 FOR 'SHIFT_JIS_2004' TO 'EUC_JIS_2004' FROM shift_jis_2004_to_euc_jis_2004;

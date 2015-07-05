@@ -136,6 +136,7 @@
 190	pg_proc	0	overlaps or is right of
 191	pg_proc	0	is right of
 192	pg_proc	0	is contained by?
+193	pg_proc	0	contains?
 200	pg_proc	0	I/O
 201	pg_proc	0	I/O
 202	pg_proc	0	multiply
@@ -395,6 +396,8 @@
 722	pg_proc	0	set byte
 723	pg_proc	0	get bit
 724	pg_proc	0	set bit
+749	pg_proc	0	substitute portion of string
+752	pg_proc	0	substitute portion of string
 725	pg_proc	0	distance between point and line
 726	pg_proc	0	distance between line and box
 727	pg_proc	0	distance between lseg and line
@@ -558,6 +561,7 @@
 1037	pg_proc	0	ACL contains item?
 1062	pg_proc	0	equality operator for ACL items
 1365	pg_proc	0	make ACL item
+1689	pg_proc	0	convert ACL item array to table, for use by information schema
 1044	pg_proc	0	I/O
 1045	pg_proc	0	I/O
 2913	pg_proc	0	I/O typmod
@@ -946,7 +950,6 @@
 1659	pg_proc	0	does not match regex., case-sensitive
 1660	pg_proc	0	matches LIKE expression, case-insensitive
 1661	pg_proc	0	does not match LIKE expression, case-insensitive
-1689	pg_proc	0	update flat-file copy of a shared catalog
 868	pg_proc	0	find position of substring
 870	pg_proc	0	lowercase
 871	pg_proc	0	uppercase
@@ -986,6 +989,7 @@
 1813	pg_proc	0	convert string with specified encoding names
 1264	pg_proc	0	convert encoding name to encoding id
 1597	pg_proc	0	convert encoding id to encoding name
+2319	pg_proc	0	maximum octet length of a character in given encoding
 1638	pg_proc	0	greater-than
 1639	pg_proc	0	greater-than-or-equal
 1573	pg_proc	0	source text of a rule
@@ -1004,6 +1008,7 @@
 1686	pg_proc	0	list of SQL keywords
 2289	pg_proc	0	convert generic options array to name/value table
 1619	pg_proc	0	returns the type of the argument
+1250	pg_proc	0	deferred UNIQUE constraint check
 1644	pg_proc	0	referential integrity FOREIGN KEY ... REFERENCES
 1645	pg_proc	0	referential integrity FOREIGN KEY ... REFERENCES
 1646	pg_proc	0	referential integrity ON DELETE CASCADE
@@ -1039,6 +1044,10 @@
 1687	pg_proc	0	adjust varbit() to typmod length
 1698	pg_proc	0	return position of sub-bitstring
 1699	pg_proc	0	return portion of bitstring
+3030	pg_proc	0	substitute portion of bitstring
+3031	pg_proc	0	substitute portion of bitstring
+3032	pg_proc	0	get bit
+3033	pg_proc	0	set bit
 436	pg_proc	0	I/O
 437	pg_proc	0	I/O
 753	pg_proc	0	MAC manufacturer fields
@@ -1229,6 +1238,9 @@
 2815	pg_proc	0	COVAR_POP(double, double) aggregate final function
 2816	pg_proc	0	COVAR_SAMP(double, double) aggregate final function
 2817	pg_proc	0	CORR(double, double) aggregate final function
+3535	pg_proc	0	string_agg(text, text) transition function
+3536	pg_proc	0	string_agg(text, text) final function
+3538	pg_proc	0	concatenate aggregate input into a string
 1845	pg_proc	0	encode text from DB encoding to ASCII text
 1846	pg_proc	0	encode text from encoding to ASCII text
 1847	pg_proc	0	encode text from encoding to ASCII text
@@ -1275,6 +1287,12 @@
 1925	pg_proc	0	user privilege on relation by user oid, rel oid
 1926	pg_proc	0	current user privilege on relation by rel name
 1927	pg_proc	0	current user privilege on relation by rel oid
+2181	pg_proc	0	user privilege on sequence by username, seq name
+2182	pg_proc	0	user privilege on sequence by username, seq oid
+2183	pg_proc	0	user privilege on sequence by user oid, seq name
+2184	pg_proc	0	user privilege on sequence by user oid, seq oid
+2185	pg_proc	0	current user privilege on sequence by seq name
+2186	pg_proc	0	current user privilege on sequence by seq oid
 3012	pg_proc	0	user privilege on column by username, rel name, col name
 3013	pg_proc	0	user privilege on column by username, rel name, col attnum
 3014	pg_proc	0	user privilege on column by username, rel oid, col name
@@ -1343,6 +1361,9 @@
 2980	pg_proc	0	statistics: self execution time of function
 2230	pg_proc	0	statistics: discard current transaction's statistics snapshot
 2274	pg_proc	0	statistics: reset collected statistics for current database
+3775	pg_proc	0	statistics: reset collected statistics shared across the cluster
+3776	pg_proc	0	statistics: reset collected statistics for a single table or index in the current database
+3777	pg_proc	0	statistics: reset collected statistics for a single function in the current database
 1946	pg_proc	0	convert bytea value into some ascii-only text string
 1947	pg_proc	0	convert ascii-encoded text string into bytea value
 1948	pg_proc	0	equal
@@ -1442,6 +1463,9 @@
 2852	pg_proc	0	current xlog insert location
 2850	pg_proc	0	xlog filename and byte offset, given an xlog location
 2851	pg_proc	0	xlog filename, given an xlog location
+3810	pg_proc	0	true if server is in recovery
+3820	pg_proc	0	current xlog flush location
+3821	pg_proc	0	last xlog replay location
 2621	pg_proc	0	reload configuration files
 2622	pg_proc	0	rotate log file
 2623	pg_proc	0	return file information
@@ -1619,10 +1643,14 @@
 2323	pg_proc	0	total disk space usage for the specified tablespace
 2324	pg_proc	0	total disk space usage for the specified database
 2168	pg_proc	0	total disk space usage for the specified database
-2325	pg_proc	0	disk space usage for the specified table or index
+2325	pg_proc	0	disk space usage for the main fork of the specified table or index
 2332	pg_proc	0	disk space usage for the specified fork of a table or index
-2286	pg_proc	0	total disk space usage for the specified table and associated indexes and toast tables
+2286	pg_proc	0	total disk space usage for the specified table and associated indexes
 2288	pg_proc	0	convert a long int to a human readable text using size units
+2997	pg_proc	0	disk space usage for the specified table, including TOAST, free space and visibility map
+2998	pg_proc	0	disk space usage for all indexes attached to the specified table
+2999	pg_proc	0	filenode identifier of relation
+3034	pg_proc	0	file path of relation
 2290	pg_proc	0	I/O
 2291	pg_proc	0	I/O
 2292	pg_proc	0	I/O
@@ -1807,6 +1835,9 @@
 2511	pg_proc	0	get the open cursors for this session
 2599	pg_proc	0	get the available time zone abbreviations
 2856	pg_proc	0	get the available time zone names
+2730	pg_proc	0	trigger description with pretty-print option
+3035	pg_proc	0	get the channels that the current backend listens to
+3036	pg_proc	0	send a notification event
 1066	pg_proc	0	non-persistent series generator
 1067	pg_proc	0	non-persistent series generator
 1068	pg_proc	0	non-persistent series generator
@@ -1853,6 +1884,8 @@
 2586	pg_proc	0	GiST support
 2591	pg_proc	0	GiST support
 2592	pg_proc	0	GiST support
+1030	pg_proc	0	GiST support
+2179	pg_proc	0	GiST support
 2731	pg_proc	0	gin(internal)
 2732	pg_proc	0	gin(internal)
 2733	pg_proc	0	gin(internal)
@@ -2019,20 +2052,7 @@
 3714	pg_proc	0	get parser's token types
 3715	pg_proc	0	parse text to tokens
 3716	pg_proc	0	parse text to tokens
-3717	pg_proc	0	
-3718	pg_proc	0	
-3719	pg_proc	0	
-3720	pg_proc	0	
-3721	pg_proc	0	
 3723	pg_proc	0	normalize one word by dictionary
-3725	pg_proc	0	
-3726	pg_proc	0	
-3728	pg_proc	0	
-3729	pg_proc	0	
-3731	pg_proc	0	
-3732	pg_proc	0	
-3740	pg_proc	0	
-3741	pg_proc	0	
 3743	pg_proc	0	generate headline
 3744	pg_proc	0	generate headline
 3754	pg_proc	0	generate headline
@@ -2108,14 +2128,12 @@
 602	pg_type	0	geometric path '(pt1,...)'
 603	pg_type	0	geometric box '(lower left,upper right)'
 604	pg_type	0	geometric polygon '(pt1,...)'
-628	pg_type	0	geometric line (not implemented)'
-629	pg_type	0	
+628	pg_type	0	geometric line (not implemented)
 700	pg_type	0	single-precision floating point number, 4-byte storage
 701	pg_type	0	double-precision floating point number, 8-byte storage
 702	pg_type	0	absolute, limited-range date and time (Unix system time)
 703	pg_type	0	relative, limited-range time interval (Unix delta time)
 704	pg_type	0	(abstime,abstime), time interval
-705	pg_type	0	
 718	pg_type	0	geometric circle '(center,radius)'
 790	pg_type	0	monetary amounts, $d,ddd.cc
 829	pg_type	0	XX:XX:XX:XX:XX:XX, MAC address
@@ -2124,12 +2142,12 @@
 1033	pg_type	0	access control list
 1042	pg_type	0	char(length), blank-padded string, fixed storage length
 1043	pg_type	0	varchar(length), non-blank-padded string, variable storage length
-1082	pg_type	0	ANSI SQL date
-1083	pg_type	0	hh:mm:ss, ANSI SQL time
+1082	pg_type	0	date
+1083	pg_type	0	time of day
 1114	pg_type	0	date and time
 1184	pg_type	0	date and time with time zone
 1186	pg_type	0	@ <number> <units>, time interval
-1266	pg_type	0	hh:mm:ss, ANSI SQL time
+1266	pg_type	0	time of day with time zone
 1560	pg_type	0	fixed-length bit string
 1562	pg_type	0	variable-length bit string
 1700	pg_type	0	numeric(precision, decimal), arbitrary precision number
@@ -2146,10 +2164,6 @@
 3734	pg_type	0	registered text search configuration
 3769	pg_type	0	registered text search dictionary
 2970	pg_type	0	txid snapshot
-1247	pg_class	0	
-1249	pg_class	0	
-1255	pg_class	0	
-1259	pg_class	0	
 403	pg_am	0	b-tree index access method
 405	pg_am	0	hash index access method
 783	pg_am	0	GiST index access method
