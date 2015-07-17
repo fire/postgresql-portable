@@ -1,4 +1,4 @@
--- $PostgreSQL: pgsql/src/backend/snowball/snowball_func.sql.in,v 1.2 2007/09/03 02:30:43 tgl Exp $$
+-- src/backend/snowball/snowball_func.sql.in$
 
 SET search_path = pg_catalog;
 
@@ -15,8 +15,7 @@ CREATE TEXT SEARCH TEMPLATE snowball
 	LEXIZE = dsnowball_lexize);
 
 COMMENT ON TEXT SEARCH TEMPLATE snowball IS 'snowball stemmer';
-
--- $PostgreSQL: pgsql/src/backend/snowball/snowball.sql.in,v 1.6 2007/10/27 16:01:08 tgl Exp $$
+-- src/backend/snowball/snowball.sql.in$
 
 -- text search configuration for danish language
 CREATE TEXT SEARCH DICTIONARY danish_stem
@@ -42,8 +41,7 @@ ALTER TEXT SEARCH CONFIGURATION danish ADD MAPPING
 ALTER TEXT SEARCH CONFIGURATION danish ADD MAPPING
     FOR word, hword_part, hword
 	WITH danish_stem;
-
--- $PostgreSQL: pgsql/src/backend/snowball/snowball.sql.in,v 1.6 2007/10/27 16:01:08 tgl Exp $$
+-- src/backend/snowball/snowball.sql.in$
 
 -- text search configuration for dutch language
 CREATE TEXT SEARCH DICTIONARY dutch_stem
@@ -69,8 +67,7 @@ ALTER TEXT SEARCH CONFIGURATION dutch ADD MAPPING
 ALTER TEXT SEARCH CONFIGURATION dutch ADD MAPPING
     FOR word, hword_part, hword
 	WITH dutch_stem;
-
--- $PostgreSQL: pgsql/src/backend/snowball/snowball.sql.in,v 1.6 2007/10/27 16:01:08 tgl Exp $$
+-- src/backend/snowball/snowball.sql.in$
 
 -- text search configuration for english language
 CREATE TEXT SEARCH DICTIONARY english_stem
@@ -96,8 +93,7 @@ ALTER TEXT SEARCH CONFIGURATION english ADD MAPPING
 ALTER TEXT SEARCH CONFIGURATION english ADD MAPPING
     FOR word, hword_part, hword
 	WITH english_stem;
-
--- $PostgreSQL: pgsql/src/backend/snowball/snowball.sql.in,v 1.6 2007/10/27 16:01:08 tgl Exp $$
+-- src/backend/snowball/snowball.sql.in$
 
 -- text search configuration for finnish language
 CREATE TEXT SEARCH DICTIONARY finnish_stem
@@ -123,8 +119,7 @@ ALTER TEXT SEARCH CONFIGURATION finnish ADD MAPPING
 ALTER TEXT SEARCH CONFIGURATION finnish ADD MAPPING
     FOR word, hword_part, hword
 	WITH finnish_stem;
-
--- $PostgreSQL: pgsql/src/backend/snowball/snowball.sql.in,v 1.6 2007/10/27 16:01:08 tgl Exp $$
+-- src/backend/snowball/snowball.sql.in$
 
 -- text search configuration for french language
 CREATE TEXT SEARCH DICTIONARY french_stem
@@ -150,8 +145,7 @@ ALTER TEXT SEARCH CONFIGURATION french ADD MAPPING
 ALTER TEXT SEARCH CONFIGURATION french ADD MAPPING
     FOR word, hword_part, hword
 	WITH french_stem;
-
--- $PostgreSQL: pgsql/src/backend/snowball/snowball.sql.in,v 1.6 2007/10/27 16:01:08 tgl Exp $$
+-- src/backend/snowball/snowball.sql.in$
 
 -- text search configuration for german language
 CREATE TEXT SEARCH DICTIONARY german_stem
@@ -177,8 +171,7 @@ ALTER TEXT SEARCH CONFIGURATION german ADD MAPPING
 ALTER TEXT SEARCH CONFIGURATION german ADD MAPPING
     FOR word, hword_part, hword
 	WITH german_stem;
-
--- $PostgreSQL: pgsql/src/backend/snowball/snowball.sql.in,v 1.6 2007/10/27 16:01:08 tgl Exp $$
+-- src/backend/snowball/snowball.sql.in$
 
 -- text search configuration for hungarian language
 CREATE TEXT SEARCH DICTIONARY hungarian_stem
@@ -204,8 +197,7 @@ ALTER TEXT SEARCH CONFIGURATION hungarian ADD MAPPING
 ALTER TEXT SEARCH CONFIGURATION hungarian ADD MAPPING
     FOR word, hword_part, hword
 	WITH hungarian_stem;
-
--- $PostgreSQL: pgsql/src/backend/snowball/snowball.sql.in,v 1.6 2007/10/27 16:01:08 tgl Exp $$
+-- src/backend/snowball/snowball.sql.in$
 
 -- text search configuration for italian language
 CREATE TEXT SEARCH DICTIONARY italian_stem
@@ -231,8 +223,7 @@ ALTER TEXT SEARCH CONFIGURATION italian ADD MAPPING
 ALTER TEXT SEARCH CONFIGURATION italian ADD MAPPING
     FOR word, hword_part, hword
 	WITH italian_stem;
-
--- $PostgreSQL: pgsql/src/backend/snowball/snowball.sql.in,v 1.6 2007/10/27 16:01:08 tgl Exp $$
+-- src/backend/snowball/snowball.sql.in$
 
 -- text search configuration for norwegian language
 CREATE TEXT SEARCH DICTIONARY norwegian_stem
@@ -258,8 +249,7 @@ ALTER TEXT SEARCH CONFIGURATION norwegian ADD MAPPING
 ALTER TEXT SEARCH CONFIGURATION norwegian ADD MAPPING
     FOR word, hword_part, hword
 	WITH norwegian_stem;
-
--- $PostgreSQL: pgsql/src/backend/snowball/snowball.sql.in,v 1.6 2007/10/27 16:01:08 tgl Exp $$
+-- src/backend/snowball/snowball.sql.in$
 
 -- text search configuration for portuguese language
 CREATE TEXT SEARCH DICTIONARY portuguese_stem
@@ -285,8 +275,7 @@ ALTER TEXT SEARCH CONFIGURATION portuguese ADD MAPPING
 ALTER TEXT SEARCH CONFIGURATION portuguese ADD MAPPING
     FOR word, hword_part, hword
 	WITH portuguese_stem;
-
--- $PostgreSQL: pgsql/src/backend/snowball/snowball.sql.in,v 1.6 2007/10/27 16:01:08 tgl Exp $$
+-- src/backend/snowball/snowball.sql.in$
 
 -- text search configuration for romanian language
 CREATE TEXT SEARCH DICTIONARY romanian_stem
@@ -312,8 +301,7 @@ ALTER TEXT SEARCH CONFIGURATION romanian ADD MAPPING
 ALTER TEXT SEARCH CONFIGURATION romanian ADD MAPPING
     FOR word, hword_part, hword
 	WITH romanian_stem;
-
--- $PostgreSQL: pgsql/src/backend/snowball/snowball.sql.in,v 1.6 2007/10/27 16:01:08 tgl Exp $$
+-- src/backend/snowball/snowball.sql.in$
 
 -- text search configuration for russian language
 CREATE TEXT SEARCH DICTIONARY russian_stem
@@ -339,8 +327,7 @@ ALTER TEXT SEARCH CONFIGURATION russian ADD MAPPING
 ALTER TEXT SEARCH CONFIGURATION russian ADD MAPPING
     FOR word, hword_part, hword
 	WITH russian_stem;
-
--- $PostgreSQL: pgsql/src/backend/snowball/snowball.sql.in,v 1.6 2007/10/27 16:01:08 tgl Exp $$
+-- src/backend/snowball/snowball.sql.in$
 
 -- text search configuration for spanish language
 CREATE TEXT SEARCH DICTIONARY spanish_stem
@@ -366,8 +353,7 @@ ALTER TEXT SEARCH CONFIGURATION spanish ADD MAPPING
 ALTER TEXT SEARCH CONFIGURATION spanish ADD MAPPING
     FOR word, hword_part, hword
 	WITH spanish_stem;
-
--- $PostgreSQL: pgsql/src/backend/snowball/snowball.sql.in,v 1.6 2007/10/27 16:01:08 tgl Exp $$
+-- src/backend/snowball/snowball.sql.in$
 
 -- text search configuration for swedish language
 CREATE TEXT SEARCH DICTIONARY swedish_stem
@@ -393,8 +379,7 @@ ALTER TEXT SEARCH CONFIGURATION swedish ADD MAPPING
 ALTER TEXT SEARCH CONFIGURATION swedish ADD MAPPING
     FOR word, hword_part, hword
 	WITH swedish_stem;
-
--- $PostgreSQL: pgsql/src/backend/snowball/snowball.sql.in,v 1.6 2007/10/27 16:01:08 tgl Exp $$
+-- src/backend/snowball/snowball.sql.in$
 
 -- text search configuration for turkish language
 CREATE TEXT SEARCH DICTIONARY turkish_stem
@@ -420,4 +405,3 @@ ALTER TEXT SEARCH CONFIGURATION turkish ADD MAPPING
 ALTER TEXT SEARCH CONFIGURATION turkish ADD MAPPING
     FOR word, hword_part, hword
 	WITH turkish_stem;
-
