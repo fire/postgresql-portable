@@ -1,6 +1,4 @@
 package PPM::XML::Element;
-use vars qw( $VERSION );
-$VERSION = '0.01_01';
 
 #
 # PPM::XML::Element
@@ -152,6 +150,8 @@ sub as_text
     $text =~ s/\n\n/\n/g;
     return $text;
 }
+
+1;
 
 __END__
 

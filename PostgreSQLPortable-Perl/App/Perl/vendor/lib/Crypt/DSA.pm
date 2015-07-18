@@ -1,6 +1,6 @@
 package Crypt::DSA;
 
-use 5.005;
+use 5.006;
 use strict;
 use Digest::SHA1 qw( sha1 );
 use Carp qw( croak );
@@ -11,7 +11,7 @@ use Crypt::DSA::Util qw( bitsize bin2mp mod_inverse mod_exp makerandom );
 
 use vars qw( $VERSION );
 BEGIN {
-    $VERSION = '1.16';
+    $VERSION = '1.17';
 }
 
 sub new {
@@ -289,7 +289,7 @@ Benjamin Trott E<lt>ben@sixapart.comE<gt>
 =head1 COPYRIGHT
 
 Except where otherwise noted,
-Crypt::DSA is Copyright 2006 - 2009 Benjamin Trott.
+Crypt::DSA is Copyright 2006 - 2011 Benjamin Trott.
 
 Crypt::DSA is free software; you may redistribute it
 and/or modify it under the same terms as Perl itself.

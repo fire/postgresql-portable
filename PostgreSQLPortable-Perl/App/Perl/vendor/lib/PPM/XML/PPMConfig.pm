@@ -10,8 +10,6 @@
 # Import everything from PPM::XML::PPD into our own namespace.
 ###############################################################################
 package PPM::XML::PPMConfig;
-use vars qw( $VERSION );
-$VERSION = '0.01_01';
 
 use PPM::XML::PPD ':elements';
 

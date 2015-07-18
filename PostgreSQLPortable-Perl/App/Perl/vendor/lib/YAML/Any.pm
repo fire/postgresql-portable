@@ -1,10 +1,10 @@
 package YAML::Any;
 
-use 5.005003;
+our $VERSION = '0.84';
+
 use strict;
 use Exporter ();
 
-$YAML::Any::VERSION   = '0.72';
 @YAML::Any::ISA       = 'Exporter';
 @YAML::Any::EXPORT    = qw(Dump Load);
 @YAML::Any::EXPORT_OK = qw(DumpFile LoadFile);
@@ -95,7 +95,7 @@ sub LoadFile {
 
 sub order {
     return @YAML::Any::_TEST_ORDER
-        if defined @YAML::Any::_TEST_ORDER;
+        if @YAML::Any::_TEST_ORDER;
     return @implementations;
 }
 

@@ -19,8 +19,10 @@ sub tcp_read_CRLF  ;
 sub ssl_write_CRLF  ($$);
 sub tcp_write_CRLF  ;
 sub dump_peer_certificate  ($);
-sub randomize  (;$$);
+sub randomize  (;$$$);
 sub new_x_ctx  ;
+sub initialize 
+;
 sub sslcat  ;
 sub tcpcat  ;
 sub tcpxcat  ;

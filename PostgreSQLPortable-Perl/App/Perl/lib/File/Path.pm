@@ -17,7 +17,7 @@ BEGIN {
 
 use Exporter ();
 use vars qw($VERSION @ISA @EXPORT @EXPORT_OK);
-$VERSION   = '2.08';
+$VERSION   = '2.09';
 @ISA       = qw(Exporter);
 @EXPORT    = qw(mkpath rmtree);
 @EXPORT_OK = qw(make_path remove_tree);
@@ -279,7 +279,7 @@ sub _rmtree {
         my ($ldev, $lino, $perm) = (lstat $root)[0,1,2] or next ROOT_DIR;
 
         if ( -d _ ) {
-            $root = VMS::Filespec::pathify($root) if $Is_VMS;
+            $root = VMS::Filespec::vmspath(VMS::Filespec::pathify($root)) if $Is_VMS;
 
             if (!chdir($root)) {
                 # see if we can escalate privileges to get in
@@ -343,7 +343,6 @@ sub _rmtree {
                 # filesystems is faster if done in reverse ASCIIbetical order.
                 # include '.' to '.;' from blead patch #31775
                 @files = map {$_ eq '.' ? '.;' : $_} reverse @files;
-                ($root = VMS::Filespec::unixify($root)) =~ s/\.dir\z//;
             }
 
             @files = grep {$_ ne $updir and $_ ne $curdir} @files;
@@ -456,8 +455,8 @@ File::Path - Create or remove directory trees
 
 =head1 VERSION
 
-This document describes version 2.08 of File::Path, released
-2009-10-04.
+This document describes version 2.09 of File::Path, released
+2013-01-17.
 
 =head1 SYNOPSIS
 
@@ -954,6 +953,10 @@ Please report all bugs on the RT queue:
 
 L<http://rt.cpan.org/NoAuth/Bugs.html?Dist=File-Path>
 
+You can also send pull requests to the Github repository:
+
+L<https://github.com/dland/File-Path>
+
 =head1 ACKNOWLEDGEMENTS
 
 Paul Szabo identified the race condition originally, and Brendan
@@ -972,7 +975,7 @@ Tim Bunce and Charles Bailey. Currently maintained by David Landgren
 =head1 COPYRIGHT
 
 This module is copyright (C) Charles Bailey, Tim Bunce and
-David Landgren 1995-2009. All rights reserved.
+David Landgren 1995-2013. All rights reserved.
 
 =head1 LICENSE
 

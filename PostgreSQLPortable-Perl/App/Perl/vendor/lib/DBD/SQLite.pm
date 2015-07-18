@@ -10,7 +10,7 @@ use vars qw{$err $errstr $drh $sqlite_version $sqlite_version_number};
 use vars qw{%COLLATION};
 
 BEGIN {
-    $VERSION = '1.31';
+    $VERSION = '1.37';
     @ISA     = 'DynaLoader';
 
     # Initialize errors
@@ -56,6 +56,9 @@ sub driver {
         DBD::SQLite::db->install_method('sqlite_backup_to_file');
         DBD::SQLite::db->install_method('sqlite_enable_load_extension');
         DBD::SQLite::db->install_method('sqlite_register_fts3_perl_tokenizer');
+        DBD::SQLite::db->install_method('sqlite_trace');
+        DBD::SQLite::db->install_method('sqlite_profile');
+
         $methods_are_installed++;
     }
 
@@ -79,9 +82,9 @@ sub connect {
     my ($drh, $dbname, $user, $auth, $attr) = @_;
 
     # Default PrintWarn to the value of $^W
-    unless ( defined $attr->{PrintWarn} ) {
-        $attr->{PrintWarn} = $^W ? 1 : 0;
-    }
+    # unless ( defined $attr->{PrintWarn} ) {
+    #    $attr->{PrintWarn} = $^W ? 1 : 0;
+    # }
 
     my $dbh = DBI::_new_dbh( $drh, {
         Name => $dbname,
@@ -91,7 +94,7 @@ sub connect {
     if ( $dbname =~ /=/ ) {
         foreach my $attrib ( split(/;/, $dbname) ) {
             my ($key, $value) = split(/=/, $attrib, 2);
-            if ( $key eq 'dbname' ) {
+            if ( $key =~ /^(?:db(?:name)?|database)$/ ) {
                 $real = $value;
             } else {
                 $attr->{$key} = $value;
@@ -136,9 +139,21 @@ sub connect {
 
     # HACK: Since PrintWarn = 0 doesn't seem to actually prevent warnings
     # in DBD::SQLite we set Warn to false if PrintWarn is false.
-    unless ( $attr->{PrintWarn} ) {
-        $attr->{Warn} = 0;
-    }
+
+    # NOTE: According to the explanation by timbunce,
+    # "Warn is meant to report on bad practices or problems with
+    # the DBI itself (hence always on by default), while PrintWarn
+    # is meant to report warnings coming from the database."
+    # That is, if you want to disable an ineffective rollback warning
+    # etc (due to bad practices), you should turn off Warn,
+    # and to silence other warnings, turn off PrintWarn.
+    # Warn and PrintWarn are independent, and turning off PrintWarn
+    # does not silence those warnings that should be controlled by
+    # Warn.
+
+    # unless ( $attr->{PrintWarn} ) {
+    #     $attr->{Warn} = 0;
+    # }
 
     return $dbh;
 }
@@ -163,6 +178,7 @@ sub install_collation {
 # (see http://www.sqlite.org/vtab.html#xfindfunction)
 sub regexp {
     use locale;
+    return if !defined $_[0] || !defined $_[1];
     return scalar($_[1] =~ $_[0]);
 }
 
@@ -739,7 +755,7 @@ like this while executing:
 
   SELECT bar FROM foo GROUP BY bar HAVING count(*) > "5";
 
-There are two workarounds for this.
+There are three workarounds for this.
 
 =over 4
 
@@ -764,6 +780,32 @@ This is somewhat weird, but works anyway.
     SELECT bar FROM foo GROUP BY bar HAVING count(*) > (? + 0);
   });
   $sth->execute(5);
+
+=item Set C<sqlite_see_if_its_a_number> database handle attribute
+
+As of version 1.32_02, you can use C<sqlite_see_if_its_a_number>
+to let DBD::SQLite to see if the bind values are numbers or not.
+
+  $dbh->{sqlite_see_if_its_a_number} = 1;
+  my $sth = $dbh->prepare(q{
+    SELECT bar FROM foo GROUP BY bar HAVING count(*) > ?;
+  });
+  $sth->execute(5);
+
+You can set it to true when you connect to a database.
+
+  my $dbh = DBI->connect('dbi:SQLite:foo', undef, undef, {
+    AutoCommit => 1,
+    RaiseError => 1,
+    sqlite_see_if_its_a_number => 1,
+  });
+
+This is the most straightforward solution, but as noted above,
+existing data in your databases created by DBD::SQLite have not
+always been stored as numbers, so this *might* cause other obscure
+problems. Use this sparingly when you handle existing databases.
+If you handle databases created by other tools like native C<sqlite3>
+command line tool, this attribute would help you.
 
 =back
 
@@ -913,6 +955,34 @@ Note that this works only when all of the connections use the same
 (non-deferred) transaction. See L<http://sqlite.org/lockingv3.html>
 for locking details.
 
+=head2 C<< $sth->finish >> and Transaction Rollback
+
+As the L<DBI> doc says, you almost certainly do B<not> need to
+call L<DBI/finish> method if you fetch all rows (probably in a loop).
+However, there are several exceptions to this rule, and rolling-back
+of an unfinished C<SELECT> statement is one of such exceptional
+cases. 
+
+SQLite prohibits C<ROLLBACK> of unfinished C<SELECT> statements in
+a transaction (See L<http://sqlite.org/lang_transaction.html> for
+details). So you need to call C<finish> before you issue a rollback.
+
+  $sth = $dbh->prepare("SELECT * FROM t");
+  $dbh->begin_work;
+  eval {
+      $sth->execute;
+      $row = $sth->fetch;
+      ...
+      die "For some reason";
+      ...
+  };
+  if($@) {
+     $sth->finish;  # You need this for SQLite
+     $dbh->rollback;
+  } else {
+     $dbh->commit;
+  }
+
 =head2 Processing Multiple Statements At A Time
 
 L<DBI>'s statement handle is not supposed to process multiple
@@ -1020,6 +1090,12 @@ If you set this to true, DBD::SQLite tries to issue a C<begin
 immediate transaction> (instead of C<begin transaction>) when
 necessary. See above for details.
 
+=item sqlite_see_if_its_a_number
+
+If you set this to true, DBD::SQLite tries to see if the bind values
+are number or not, and does not quote if they are numbers. See above
+for details.
+
 =back
 
 =head2 Statement Handle Attributes
@@ -1084,6 +1160,11 @@ for details). So, if you're using L<DBI> >= 1.608, use these C<sqlite_>
 methods. If you need to use an older L<DBI>, you can call these like this:
 
   $dbh->func( ..., "(method name without sqlite_ prefix)" );
+
+Exception: C<sqlite_trace> should always be called as is, even with C<func()>
+method (to avoid conflict with DBI's trace() method).
+
+  $dbh->func( ..., "sqlite_trace");
 
 =head2 $dbh->sqlite_last_insert_rowid()
 
@@ -1448,6 +1529,59 @@ sqlite3 extensions. After the call, you can load extensions like this:
   $sth = $dbh->prepare("select load_extension('libsqlitefunctions.so')")
   or die "Cannot prepare: " . $dbh->errstr();
 
+=head2 $dbh->sqlite_trace( $code_ref )
+
+This method registers a trace callback to be invoked whenever
+SQL statements are being run.
+
+The callback will be called as
+
+  $code_ref->($statement)
+
+where
+
+=over
+
+=item $statement
+
+is a UTF-8 rendering of the SQL statement text as the statement
+first begins executing.
+
+=back
+
+Additional callbacks might occur as each triggered subprogram is
+entered. The callbacks for triggers contain a UTF-8 SQL comment
+that identifies the trigger.
+
+See also L<DBI/TRACING> for better tracing options.
+
+=head2 $dbh->sqlite_profile( $code_ref )
+
+This method registers a profile callback to be invoked whenever
+a SQL statement finishes.
+
+The callback will be called as
+
+  $code_ref->($statement, $elapsed_time)
+
+where
+
+=over
+
+=item $statement
+
+is the original statement text (without bind parameters).
+
+=item $elapsed_time
+
+is an estimate of wall-clock time of how long that statement took to run (in milliseconds).
+
+=back
+
+This method is considered experimental and is subject to change in future versions of SQLite.
+
+See also L<DBI::Profile> for better profiling options.
+
 =head2 DBD::SQLite::compile_options()
 
 Returns an array of compile options (available since sqlite 3.6.23,
@@ -1459,7 +1593,7 @@ library is old or compiled with SQLITE_OMIT_COMPILEOPTION_DIAGS.
 A subset of SQLite C constants are made available to Perl,
 because they may be needed when writing
 hooks or authorizer callbacks. For accessing such constants,
-the C<DBD::Sqlite> module must be explicitly C<use>d at compile
+the C<DBD::SQLite> module must be explicitly C<use>d at compile
 time. For example, an authorizer that forbids any
 DELETE operation would be written as follows :
 
@@ -1789,7 +1923,7 @@ discard punctuation, use the perl tokenizer as explained below.
 
 =head3 Perl tokenizers
 
-In addition to the builtin SQLite tokenizers, C<DBD::Sqlite>
+In addition to the builtin SQLite tokenizers, C<DBD::SQLite>
 implements a I<perl> tokenizer, that can hook to any tokenizing
 algorithm written in Perl. This is specified as follows :
 
@@ -1877,6 +2011,44 @@ available as external resources (for example files on the filesystem),
 that space can sometimes be spared --- see the tip in the 
 L<Cookbook|DBD::SQLite::Cookbook/"Sparing database disk space">.
 
+=head1 R* TREE SUPPORT
+
+The RTREE extension module within SQLite adds support for creating
+a R-Tree, a special index for range and multidimensional queries.  This
+allows users to create tables that can be loaded with (as an example)
+geospatial data such as latitude/longitude coordinates for buildings within
+a city :
+
+  CREATE VIRTUAL TABLE city_buildings USING rtree(
+     id,               -- Integer primary key
+     minLong, maxLong, -- Minimum and maximum longitude
+     minLat, maxLat    -- Minimum and maximum latitude
+  );
+
+then query which buildings overlap or are contained within a specified region:
+
+  # IDs that are contained within query coordinates
+  my $contained_sql = <<"";
+  SELECT id FROM try_rtree
+     WHERE  minLong >= ? AND maxLong <= ?
+     AND    minLat  >= ? AND maxLat  <= ?
+  
+  # ... and those that overlap query coordinates
+  my $overlap_sql = <<"";
+  SELECT id FROM try_rtree
+     WHERE    maxLong >= ? AND minLong <= ?
+     AND      maxLat  >= ? AND minLat  <= ?
+  
+  my $contained = $dbh->selectcol_arrayref($contained_sql,undef,
+                        $minLong, $maxLong, $minLat, $maxLat);
+  
+  my $overlapping = $dbh->selectcol_arrayref($overlap_sql,undef,
+                        $minLong, $maxLong, $minLat, $maxLat);  
+
+For more detail, please see the SQLite R-Tree page
+(L<http://www.sqlite.org/rtree.html>). Note that custom R-Tree
+queries using callbacks, as mentioned in the prior link, have not been
+implemented yet.
 
 =head1 FOR DBD::SQLITE EXTENSION AUTHORS
 
@@ -1913,13 +2085,6 @@ system).
 
 The following items remain to be done.
 
-=head2 Warnings Upgrade
-
-We currently use a horridly hacky method to issue and suppress warnings.
-It suffices for now, but just barely.
-
-Migrate all of the warning code to use the recommended L<DBI> warnings.
-
 =head2 Leak Detection
 
 Implement one or more leak detection tests that only run during
@@ -1933,6 +2098,13 @@ Reading/writing into blobs using C<sqlite2_blob_open> / C<sqlite2_blob_close>.
 =head2 Flags for sqlite3_open_v2
 
 Support the full API of sqlite3_open_v2 (flags for opening the file).
+
+=head2 Support for custom callbacks for R-Tree queries
+
+Custom queries of a R-Tree index using a callback are possible with
+the SQLite C API (L<http://www.sqlite.org/rtree.html>), so one could
+potentially use a callback that narrowed the result set down based
+on a specific need, such as querying for overlapping circles.
 
 =head1 SUPPORT
 
@@ -1970,7 +2142,9 @@ Some parts copyright 2008 Francis J. Lacoste.
 
 Some parts copyright 2008 Wolfgang Sourdeau.
 
-Some parts copyright 2008 - 2010 Adam Kennedy.
+Some parts copyright 2008 - 2012 Adam Kennedy.
+
+Some parts copyright 2009 - 2012 Kenichi Ishigaki.
 
 Some parts derived from L<DBD::SQLite::Amalgamation>
 copyright 2008 Audrey Tang.

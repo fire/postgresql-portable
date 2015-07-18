@@ -2,7 +2,7 @@ package PPM;
 require 5.004;
 require Exporter;
 use vars qw( $VERSION );
-$VERSION = '0.01_03';
+$VERSION = '11.11_02';
 
 @ISA = qw(Exporter);
 @EXPORT = qw(PPMdat PPMERR InstalledPackageProperties ListOfRepositories
@@ -419,13 +419,13 @@ sub InstallPackage
     my $inst_lib = $Config{installsitelib};
 
     if (defined $root && $root !~ /^\Q$inst_root\E$/i) {
-        $packlist =~ s/\Q$inst_root/$root\E/i;
-        $inst_lib =~ s/\Q$inst_root/$root\E/i;
-        $inst_archlib =~ s/\Q$inst_root/$root\E/i;
-        $inst_bin =~ s/\Q$inst_root/$root\E/i;
-        $inst_script =~ s/\Q$inst_root/$root\E/i;
-        $inst_man1dir =~ s/\Q$inst_root/$root\E/i;
-        $inst_man3dir =~ s/\Q$inst_root/$root\E/i;
+        $packlist =~ s/\Q$inst_root\E/$root/i;
+        $inst_lib =~ s/\Q$inst_root\E/$root/i;
+        $inst_archlib =~ s/\Q$inst_root\E/$root/i;
+        $inst_bin =~ s/\Q$inst_root\E/$root/i;
+        $inst_script =~ s/\Q$inst_root\E/$root/i;
+        $inst_man1dir =~ s/\Q$inst_root\E/$root/i;
+        $inst_man3dir =~ s/\Q$inst_root\E/$root/i;
         $inst_root = $root;
     }
     
@@ -1777,6 +1777,12 @@ sub read_config
             # Strip trailing separator
             my $chr = substr( $options{'BUILDDIR'}, -1, 1 );
             chop $options{'BUILDDIR'} if ($chr eq '/' || $chr eq '\\');
+            
+            #use File::HomeDir if available
+            if (eval {require File::HomeDir}) {
+              $options{'BUILDDIR'} = File::Spec->catdir(File::HomeDir->my_home, ".ppm");
+            }
+            
             if ($options{'TRACE'} && !$TraceStarted) {
                 $options{'TRACEFILE'} = "PPM.log" if (!defined $options{'TRACEFILE'});
                 open(PPMTRACE, ">>$options{'TRACEFILE'}");

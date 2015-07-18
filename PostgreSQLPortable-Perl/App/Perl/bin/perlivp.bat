@@ -15,7 +15,7 @@ goto endofperl
     eval 'exec C:\strawberry\perl\bin\perl.exe -S $0 ${1+"$@"}'
         if $running_under_some_shell;
 
-# perlivp v5.10.1
+# perlivp v5.14.4
 
 sub usage {
     warn "@_\n" if @_;
@@ -77,7 +77,7 @@ $tests_total++;
 
 print "## Checking Perl version via variable `\$]'.\n" if $opt{'p'};
 
-my $ivp_VERSION = "5.010001";
+my $ivp_VERSION = "5.014004";
 
 if ($ivp_VERSION eq $]) {
     print "## Perl version `$]' appears installed as expected.\n" if $opt{'v'};
@@ -98,10 +98,6 @@ my $INC_total = 0;
 my $INC_there = 0;
 foreach (@INC) {
     next if $_ eq '.'; # skip -d test here
-    if ($^O eq 'MacOS') {
-        next if $_ eq ':'; # skip -d test here
-        next if $_ eq 'Dev:Pseudo:'; # why is this in @INC?
-    }
     if (-d $_) {
         print "## Perl \@INC directory `$_' exists.\n" if $opt{'v'};
         $INC_there++;
@@ -166,7 +162,10 @@ if (defined($Config{'extensions'})) {
         }
         # that's a distribution name, not a module name
         next if $_ eq 'IO/Compress';
-        next if $_ eq 'Devel/DProf'; 
+        next if $_ eq 'Devel/DProf';
+        next if $_ eq 'libnet';
+        next if $_ eq 'Locale/Codes';
+        next if $_ eq 'podlators';
         # test modules
         next if $_ eq 'XS/APItest';
         next if $_ eq 'XS/Typemap';
@@ -188,7 +187,7 @@ if (defined($Config{'extensions'})) {
 
     # A silly name for a module (that hopefully won't ever exist).
     # Note that this test serves more as a check of the validity of the
-    # actuall required module tests above.
+    # actual required module tests above.
     my $unnecessary = 'bLuRfle';
 
     if (!grep(/$unnecessary/, @extensions)) {

@@ -3,7 +3,7 @@ package Imager;
 use strict;
 use vars qw($VERSION @ISA @EXPORT @EXPORT_OK %EXPORT_TAGS %formats $DEBUG %filters %DSOs $ERRSTR %OPCODES $I2P $FORMATGUESS $warn_obsolete);
 use IO::File;
-
+use Scalar::Util;
 use Imager::Color;
 use Imager::Font;
 
@@ -23,11 +23,6 @@ use Imager::Font;
 		i_color_new
 		i_color_set
 		i_color_info
-
-		i_img_empty
-		i_img_empty_ch
-		i_img_exorcise
-		i_img_destroy
 
 		i_img_info
 
@@ -94,14 +89,6 @@ use Imager::Font;
 );
 
 @EXPORT=qw(
-	   init_log
-	   i_list_formats
-	   i_has_format
-	   malloc_state
-	   i_color_new
-
-	   i_img_empty
-	   i_img_empty_ch
 	  );
 
 %EXPORT_TAGS=
@@ -127,6 +114,13 @@ my %writers;
 # modules we attempted to autoload
 my %attempted_to_load;
 
+# errors from loading files
+my %file_load_errors;
+
+# what happened when we tried to load
+my %reader_load_errors;
+my %writer_load_errors;
+
 # library keys that are image file formats
 my %file_formats = map { $_ => 1 } qw/tiff pnm gif png jpeg raw bmp tga/;
 
@@ -145,17 +139,13 @@ my %defaults;
 
 BEGIN {
   require Exporter;
-  @ISA = qw(Exporter);
-  $VERSION = '0.82';
-  eval {
-    require XSLoader;
-    XSLoader::load(Imager => $VERSION);
-    1;
-  } or do {
-    require DynaLoader;
-    push @ISA, 'DynaLoader';
-    bootstrap Imager $VERSION;
+  my $ex_version = eval $Exporter::VERSION;
+  if ($ex_version < 5.57) {
+    @ISA = qw(Exporter);
   }
+  $VERSION = '0.94';
+  require XSLoader;
+  XSLoader::load(Imager => $VERSION);
 }
 
 my %formats_low;
@@ -451,25 +441,67 @@ sub import {
 }
 
 sub init_log {
-  i_init_log($_[0],$_[1]);
-  i_log_entry("Imager $VERSION starting\n", 1);
+  Imager->open_log(log => $_[0], level => $_[1]);
 }
 
 
 sub init {
   my %parms=(loglevel=>1,@_);
-  if ($parms{'log'}) {
-    init_log($parms{'log'},$parms{'loglevel'});
-  }
 
   if (exists $parms{'warn_obsolete'}) {
     $warn_obsolete = $parms{'warn_obsolete'};
   }
 
+  if ($parms{'log'}) {
+    Imager->open_log(log => $parms{log}, level => $parms{loglevel})
+      or return;
+  }
+
   if (exists $parms{'t1log'}) {
     if ($formats{t1}) {
-      Imager::Font::T1::i_init_t1($parms{'t1log'});
+      if (Imager::Font::T1::i_init_t1($parms{'t1log'})) {
+	Imager->_set_error(Imager->_error_as_msg);
+	return;
+      }
     }
+  }
+
+  return 1;
+}
+
+{
+  my $is_logging = 0;
+
+  sub open_log {
+    my $class = shift;
+    my (%opts) = ( loglevel => 1, @_ );
+
+    $is_logging = i_init_log($opts{log}, $opts{loglevel});
+    unless ($is_logging) {
+      Imager->_set_error(Imager->_error_as_msg());
+      return;
+    }
+
+    Imager->log("Imager $VERSION starting\n", 1);
+
+    return $is_logging;
+  }
+
+  sub close_log {
+    i_init_log(undef, -1);
+    $is_logging = 0;
+  }
+
+  sub log {
+    my ($class, $message, $level) = @_;
+
+    defined $level or $level = 1;
+
+    i_log_entry($message, $level);
+  }
+
+  sub is_logging {
+    return $is_logging;
   }
 }
 
@@ -585,11 +617,13 @@ sub _combine {
 }
 
 sub _valid_image {
-  my ($self) = @_;
+  my ($self, $method) = @_;
 
-  $self->{IMG} and return 1;
+  $self->{IMG} && Scalar::Util::blessed($self->{IMG}) and return 1;
 
-  $self->_set_error('empty input image');
+  my $msg = $self->{IMG} ? "images do not cross threads" : "empty input image";
+  $msg = "$method: $msg" if $method;
+  $self->_set_error($msg);
 
   return;
 }
@@ -653,7 +687,9 @@ sub new {
 
 sub copy {
   my $self = shift;
-  unless ($self->{IMG}) { $self->{ERRSTR}='empty input image'; return undef; }
+
+  $self->_valid_image("copy")
+    or return;
 
   unless (defined wantarray) {
     my @caller = caller;
@@ -671,14 +707,17 @@ sub copy {
 sub paste {
   my $self = shift;
 
-  unless ($self->{IMG}) { 
-    $self->_set_error('empty input image');
-    return;
-  }
+  $self->_valid_image("paste")
+    or return;
+
   my %input=(left=>0, top=>0, src_minx => 0, src_miny => 0, @_);
   my $src = $input{img} || $input{src};
   unless($src) {
     $self->_set_error("no source image");
+    return;
+  }
+  unless ($src->_valid_image("paste")) {
+    $self->{ERRSTR} = $src->{ERRSTR} . " (for src)";
     return;
   }
   $input{left}=0 if $input{left} <= 0;
@@ -739,7 +778,9 @@ sub paste {
 
 sub crop {
   my $self=shift;
-  unless ($self->{IMG}) { $self->{ERRSTR}='empty input image'; return undef; }
+
+  $self->_valid_image("crop")
+    or return;
   
   unless (defined wantarray) {
     my @caller = caller;
@@ -827,7 +868,8 @@ sub crop {
 sub _sametype {
   my ($self, %opts) = @_;
 
-  $self->{IMG} or return $self->_set_error("Not a valid image");
+  $self->_valid_image
+    or return;
 
   my $x = $opts{xsize} || $self->getwidth;
   my $y = $opts{ysize} || $self->getheight;
@@ -874,8 +916,8 @@ sub img_set {
     $self->{IMG} = i_img_16_new($hsh{xsize}, $hsh{ysize}, $hsh{channels});
   }
   else {
-    $self->{IMG}=Imager::ImgRaw::new($hsh{'xsize'}, $hsh{'ysize'},
-                                     $hsh{'channels'});
+    $self->{IMG}= i_img_8_new($hsh{'xsize'}, $hsh{'ysize'},
+			      $hsh{'channels'});
   }
 
   unless ($self->{IMG}) {
@@ -890,7 +932,9 @@ sub img_set {
 sub masked {
   my $self = shift;
 
-  $self or return undef;
+  $self->_valid_image("masked")
+    or return;
+
   my %opts = (left    => 0, 
               top     => 0, 
               right   => $self->getwidth, 
@@ -931,24 +975,40 @@ sub to_paletted {
     return;
   }
 
+  $self->_valid_image("to_paletted")
+    or return;
+
   my $result = Imager->new;
-  $result->{IMG} = i_img_to_pal($self->{IMG}, $opts);
-
-  #print "Type ", i_img_type($result->{IMG}), "\n";
-
-  if ($result->{IMG}) {
-    return $result;
-  }
-  else {
-    $self->{ERRSTR} = $self->_error_as_msg;
+  unless ($result->{IMG} = i_img_to_pal($self->{IMG}, $opts)) {
+    $self->_set_error(Imager->_error_as_msg);
     return;
   }
+
+  return $result;
 }
 
-# convert a paletted (or any image) to an 8-bit/channel RGB images
+sub make_palette {
+  my ($class, $quant, @images) = @_;
+
+  unless (@images) {
+    Imager->_set_error("make_palette: supply at least one image");
+    return;
+  }
+  my $index = 1;
+  for my $img (@images) {
+    unless ($img->{IMG}) {
+      Imager->_set_error("make_palette: image $index is empty");
+      return;
+    }
+    ++$index;
+  }
+
+  return i_img_make_palette($quant, map $_->{IMG}, @images);
+}
+
+# convert a paletted (or any image) to an 8-bit/channel RGB image
 sub to_rgb8 {
   my $self = shift;
-  my $result;
 
   unless (defined wantarray) {
     my @caller = caller;
@@ -956,30 +1016,57 @@ sub to_rgb8 {
     return;
   }
 
-  if ($self->{IMG}) {
-    $result = Imager->new;
-    $result->{IMG} = i_img_to_rgb($self->{IMG})
-      or undef $result;
+  $self->_valid_image("to_rgb8")
+    or return;
+
+  my $result = Imager->new;
+  unless ($result->{IMG} = i_img_to_rgb($self->{IMG})) {
+    $self->_set_error(Imager->_error_as_msg());
+    return;
   }
 
   return $result;
 }
 
-# convert a paletted (or any image) to an 8-bit/channel RGB images
+# convert a paletted (or any image) to a 16-bit/channel RGB image
 sub to_rgb16 {
   my $self = shift;
-  my $result;
 
   unless (defined wantarray) {
     my @caller = caller;
-    warn "to_rgb16() called in void context - to_rgb8() returns the converted image at $caller[1] line $caller[2]\n";
+    warn "to_rgb16() called in void context - to_rgb16() returns the converted image at $caller[1] line $caller[2]\n";
     return;
   }
 
-  if ($self->{IMG}) {
-    $result = Imager->new;
-    $result->{IMG} = i_img_to_rgb16($self->{IMG})
-      or undef $result;
+  $self->_valid_image("to_rgb16")
+    or return;
+
+  my $result = Imager->new;
+  unless ($result->{IMG} = i_img_to_rgb16($self->{IMG})) {
+    $self->_set_error(Imager->_error_as_msg());
+    return;
+  }
+
+  return $result;
+}
+
+# convert a paletted (or any image) to an double/channel RGB image
+sub to_rgb_double {
+  my $self = shift;
+
+  unless (defined wantarray) {
+    my @caller = caller;
+    warn "to_rgb16() called in void context - to_rgb_double() returns the converted image at $caller[1] line $caller[2]\n";
+    return;
+  }
+
+  $self->_valid_image("to_rgb_double")
+    or return;
+
+  my $result = Imager->new;
+  unless ($result->{IMG} = i_img_to_drgb($self->{IMG})) {
+    $self->_set_error(Imager->_error_as_msg());
+    return;
   }
 
   return $result;
@@ -989,10 +1076,8 @@ sub addcolors {
   my $self = shift;
   my %opts = (colors=>[], @_);
 
-  unless ($self->{IMG}) {
-    $self->_set_error("empty input image");
-    return;
-  }
+  $self->_valid_image("addcolors")
+    or return -1;
 
   my @colors = @{$opts{colors}}
     or return undef;
@@ -1012,10 +1097,8 @@ sub setcolors {
   my $self = shift;
   my %opts = (start=>0, colors=>[], @_);
 
-  unless ($self->{IMG}) {
-    $self->_set_error("empty input image");
-    return;
-  }
+  $self->_valid_image("setcolors")
+    or return;
 
   my @colors = @{$opts{colors}}
     or return undef;
@@ -1034,6 +1117,10 @@ sub setcolors {
 sub getcolors {
   my $self = shift;
   my %opts = @_;
+
+  $self->_valid_image("getcolors")
+    or return;
+
   if (!exists $opts{start} && !exists $opts{count}) {
     # get them all
     $opts{start} = 0;
@@ -1045,52 +1132,82 @@ sub getcolors {
   elsif (!exists $opts{start}) {
     $opts{start} = 0;
   }
-  
-  $self->{IMG} and 
-    return i_getcolors($self->{IMG}, $opts{start}, $opts{count});
+
+  return i_getcolors($self->{IMG}, $opts{start}, $opts{count});
 }
 
 sub colorcount {
-  i_colorcount($_[0]{IMG});
+  my ($self) = @_;
+
+  $self->_valid_image("colorcount")
+    or return -1;
+
+  return i_colorcount($self->{IMG});
 }
 
 sub maxcolors {
-  i_maxcolors($_[0]{IMG});
+  my $self = shift;
+
+  $self->_valid_image("maxcolors")
+    or return -1;
+
+  i_maxcolors($self->{IMG});
 }
 
 sub findcolor {
   my $self = shift;
   my %opts = @_;
-  $opts{color} or return undef;
 
-  $self->{IMG} and i_findcolor($self->{IMG}, $opts{color});
+  $self->_valid_image("findcolor")
+    or return;
+
+  unless ($opts{color}) {
+    $self->_set_error("findcolor: no color parameter");
+    return;
+  }
+
+  my $color = _color($opts{color})
+    or return;
+
+  return i_findcolor($self->{IMG}, $color);
 }
 
 sub bits {
   my $self = shift;
-  my $bits = $self->{IMG} && i_img_bits($self->{IMG});
+
+  $self->_valid_image("bits")
+    or return;
+
+  my $bits = i_img_bits($self->{IMG});
   if ($bits && $bits == length(pack("d", 1)) * 8) {
     $bits = 'double';
   }
-  $bits;
+  return $bits;
 }
 
 sub type {
   my $self = shift;
-  if ($self->{IMG}) {
-    return i_img_type($self->{IMG}) ? "paletted" : "direct";
-  }
+
+  $self->_valid_image("type")
+    or return;
+
+  return i_img_type($self->{IMG}) ? "paletted" : "direct";
 }
 
 sub virtual {
   my $self = shift;
-  $self->{IMG} and i_img_virtual($self->{IMG});
+
+  $self->_valid_image("virtual")
+    or return;
+
+  return i_img_virtual($self->{IMG});
 }
 
 sub is_bilevel {
   my ($self) = @_;
 
-  $self->{IMG} or return;
+  $self->_valid_image("is_bilevel")
+    or return;
 
   return i_img_is_monochrome($self->{IMG});
 }
@@ -1098,7 +1215,8 @@ sub is_bilevel {
 sub tags {
   my ($self, %opts) = @_;
 
-  $self->{IMG} or return;
+  $self->_valid_image("tags")
+    or return;
 
   if (defined $opts{name}) {
     my @result;
@@ -1134,7 +1252,9 @@ sub addtag {
   my $self = shift;
   my %opts = @_;
 
-  return -1 unless $self->{IMG};
+  $self->_valid_image("addtag")
+    or return;
+
   if ($opts{name}) {
     if (defined $opts{value}) {
       if ($opts{value} =~ /^\d+$/) {
@@ -1182,7 +1302,8 @@ sub deltag {
   my $self = shift;
   my %opts = @_;
 
-  return 0 unless $self->{IMG};
+  $self->_valid_image("deltag")
+    or return 0;
 
   if (defined $opts{'index'}) {
     return i_tags_delete($self->{IMG}, $opts{'index'});
@@ -1201,6 +1322,9 @@ sub deltag {
 
 sub settag {
   my ($self, %opts) = @_;
+
+  $self->_valid_image("settag")
+    or return;
 
   if ($opts{name}) {
     $self->deltag(name=>$opts{name});
@@ -1268,13 +1392,17 @@ sub _get_reader_io {
 }
 
 sub _get_writer_io {
-  my ($self, $input, $type) = @_;
+  my ($self, $input) = @_;
 
+  my $buffered = exists $input->{buffered} ? $input->{buffered} : 1;
+
+  my $io;
+  my @extras;
   if ($input->{io}) {
-    return $input->{io};
+    $io = $input->{io};
   }
   elsif ($input->{fd}) {
-    return io_new_fd($input->{fd});
+    $io = io_new_fd($input->{fd});
   }
   elsif ($input->{fh}) {
     my $fd = fileno($input->{fh});
@@ -1287,7 +1415,7 @@ sub _get_writer_io {
     # flush anything that's buffered, and make sure anything else is flushed
     $| = 1;
     select($oldfh);
-    return io_new_fd($fd);
+    $io = io_new_fd($fd);
   }
   elsif ($input->{file}) {
     my $fh = new IO::File($input->{file},"w+");
@@ -1296,28 +1424,30 @@ sub _get_writer_io {
       return;
     }
     binmode($fh) or die;
-    return (io_new_fd(fileno($fh)), $fh);
+    $io = io_new_fd(fileno($fh));
+    push @extras, $fh;
   }
   elsif ($input->{data}) {
-    return io_new_bufchain();
+    $io = io_new_bufchain();
   }
   elsif ($input->{callback} || $input->{writecb}) {
-    if ($input->{maxbuffer}) {
-      return io_new_cb($input->{callback} || $input->{writecb},
-                       $input->{readcb},
-                       $input->{seekcb}, $input->{closecb},
-                       $input->{maxbuffer});
+    if ($input->{maxbuffer} && $input->{maxbuffer} == 1) {
+      $buffered = 0;
     }
-    else {
-      return io_new_cb($input->{callback} || $input->{writecb},
-                       $input->{readcb},
-                       $input->{seekcb}, $input->{closecb});
-    }
+    $io = io_new_cb($input->{callback} || $input->{writecb},
+		    $input->{readcb},
+		    $input->{seekcb}, $input->{closecb});
   }
   else {
     $self->_set_error("file/fd/fh/data/callback parameter missing");
     return;
   }
+
+  unless ($buffered) {
+    $io->set_buffered(0);
+  }
+
+  return ($io, @extras);
 }
 
 # Read an image from file
@@ -1335,31 +1465,39 @@ sub read {
 
   my ($IO, $fh) = $self->_get_reader_io(\%input) or return;
 
-  unless ($input{'type'}) {
-    $input{'type'} = i_test_format_probe($IO, -1);
+  my $type = $input{'type'};
+  unless ($type) {
+    $type = i_test_format_probe($IO, -1);
   }
 
-  unless ($input{'type'}) {
-	  $self->_set_error('type parameter missing and not possible to guess from extension'); 
+  if ($input{file} && !$type) {
+    # guess the type 
+    $type = $FORMATGUESS->($input{file});
+  }
+
+  unless ($type) {
+    my $msg = "type parameter missing and it couldn't be determined from the file contents";
+    $input{file} and $msg .= " or file name";
+    $self->_set_error($msg);
     return undef;
   }
 
-  _reader_autoload($input{type});
+  _reader_autoload($type);
 
-  if ($readers{$input{type}} && $readers{$input{type}}{single}) {
-    return $readers{$input{type}}{single}->($self, $IO, %input);
+  if ($readers{$type} && $readers{$type}{single}) {
+    return $readers{$type}{single}->($self, $IO, %input);
   }
 
-  unless ($formats_low{$input{'type'}}) {
+  unless ($formats_low{$type}) {
     my $read_types = join ', ', sort Imager->read_types();
-    $self->_set_error("format '$input{'type'}' not supported - formats $read_types available for reading");
+    $self->_set_error("format '$type' not supported - formats $read_types available for reading - $reader_load_errors{$type}");
     return;
   }
 
   my $allow_incomplete = $input{allow_incomplete};
   defined $allow_incomplete or $allow_incomplete = 0;
 
-  if ( $input{'type'} eq 'pnm' ) {
+  if ( $type eq 'pnm' ) {
     $self->{IMG}=i_readpnm_wiol( $IO, $allow_incomplete );
     if ( !defined($self->{IMG}) ) {
       $self->{ERRSTR}='unable to read pnm image: '._error_as_msg(); 
@@ -1369,7 +1507,7 @@ sub read {
     return $self;
   }
 
-  if ( $input{'type'} eq 'bmp' ) {
+  if ( $type eq 'bmp' ) {
     $self->{IMG}=i_readbmp_wiol( $IO, $allow_incomplete );
     if ( !defined($self->{IMG}) ) {
       $self->{ERRSTR}=$self->_error_as_msg();
@@ -1378,42 +1516,7 @@ sub read {
     $self->{DEBUG} && print "loading a bmp file\n";
   }
 
-  if ( $input{'type'} eq 'gif' ) {
-    if ($input{colors} && !ref($input{colors})) {
-      # must be a reference to a scalar that accepts the colour map
-      $self->{ERRSTR} = "option 'colors' must be a scalar reference";
-      return undef;
-    }
-    if ($input{'gif_consolidate'}) {
-      if ($input{colors}) {
-	my $colors;
-	($self->{IMG}, $colors) =i_readgif_wiol( $IO );
-	if ($colors) {
-	  ${ $input{colors} } = [ map { NC(@$_) } @$colors ];
-	}
-      }
-      else {
-	$self->{IMG} =i_readgif_wiol( $IO );
-      }
-    }
-    else {
-      my $page = $input{'page'};
-      defined $page or $page = 0;
-      $self->{IMG} = i_readgif_single_wiol( $IO, $page );
-      if ($self->{IMG} && $input{colors}) {
-	${ $input{colors} } =
-	  [ i_getcolors($self->{IMG}, 0, i_colorcount($self->{IMG})) ];
-      }
-    }
-
-    if ( !defined($self->{IMG}) ) {
-      $self->{ERRSTR}=$self->_error_as_msg();
-      return undef;
-    }
-    $self->{DEBUG} && print "loading a gif file\n";
-  }
-
-  if ( $input{'type'} eq 'tga' ) {
+  if ( $type eq 'tga' ) {
     $self->{IMG}=i_readtga_wiol( $IO, -1 ); # Fixme, check if that length parameter is ever needed
     if ( !defined($self->{IMG}) ) {
       $self->{ERRSTR}=$self->_error_as_msg();
@@ -1422,7 +1525,7 @@ sub read {
     $self->{DEBUG} && print "loading a tga file\n";
   }
 
-  if ( $input{'type'} eq 'raw' ) {
+  if ( $type eq 'raw' ) {
     unless ( $input{xsize} && $input{ysize} ) {
       $self->_set_error('missing xsize or ysize parameter for raw');
       return undef;
@@ -1521,6 +1624,41 @@ sub write_types {
   return keys %types;
 }
 
+sub _load_file {
+  my ($file, $error) = @_;
+
+  if ($attempted_to_load{$file}) {
+    if ($file_load_errors{$file}) {
+      $$error = $file_load_errors{$file};
+      return 0;
+    }
+    else {
+      return 1;
+    }
+  }
+  else {
+    local $SIG{__DIE__};
+    my $loaded = eval {
+      ++$attempted_to_load{$file};
+      require $file;
+      return 1;
+    };
+    if ($loaded) {
+      return 1;
+    }
+    else {
+      my $work = $@ || "Unknown error";
+      chomp $work;
+      $work =~ s/\n?Compilation failed in require at .*Imager\.pm line .*\z//m;
+      $work =~ s/\n/\\n/g;
+      $work =~ s/\s*\.?\z/ loading $file/;
+      $file_load_errors{$file} = $work;
+      $$error = $work;
+      return 0;
+    }
+  }
+}
+
 # probes for an Imager::File::whatever module
 sub _reader_autoload {
   my $type = shift;
@@ -1531,21 +1669,17 @@ sub _reader_autoload {
 
   my $file = "Imager/File/\U$type\E.pm";
 
-  unless ($attempted_to_load{$file}) {
-    eval {
-      ++$attempted_to_load{$file};
-      require $file;
-    };
-    if ($@) {
-      # try to get a reader specific module
-      my $file = "Imager/File/\U$type\EReader.pm";
-      unless ($attempted_to_load{$file}) {
-	eval {
-	  ++$attempted_to_load{$file};
-	  require $file;
-	};
-      }
+  my $error;
+  my $loaded = _load_file($file, \$error);
+  if (!$loaded && $error =~ /^Can't locate /) {
+    my $filer = "Imager/File/\U$type\EReader.pm";
+    $loaded = _load_file($filer, \$error);
+    if ($error =~ /^Can't locate /) {
+      $error = "Can't locate $file or $filer";
     }
+  }
+  unless ($loaded) {
+    $reader_load_errors{$type} = $error;
   }
 }
 
@@ -1553,27 +1687,23 @@ sub _reader_autoload {
 sub _writer_autoload {
   my $type = shift;
 
-  return if $formats_low{$type} || $readers{$type};
+  return if $formats_low{$type} || $writers{$type};
 
   return unless $type =~ /^\w+$/;
 
   my $file = "Imager/File/\U$type\E.pm";
 
-  unless ($attempted_to_load{$file}) {
-    eval {
-      ++$attempted_to_load{$file};
-      require $file;
-    };
-    if ($@) {
-      # try to get a writer specific module
-      my $file = "Imager/File/\U$type\EWriter.pm";
-      unless ($attempted_to_load{$file}) {
-	eval {
-	  ++$attempted_to_load{$file};
-	  require $file;
-	};
-      }
+  my $error;
+  my $loaded = _load_file($file, \$error);
+  if (!$loaded && $error =~ /^Can't locate /) {
+    my $filew = "Imager/File/\U$type\EWriter.pm";
+    $loaded = _load_file($filew, \$error);
+    if ($error =~ /^Can't locate /) {
+      $error = "Can't locate $file or $filew";
     }
+  }
+  unless ($loaded) {
+    $writer_load_errors{$type} = $error;
   }
 }
 
@@ -1688,40 +1818,42 @@ sub write {
 	     fax_fine=>1, @_);
   my $rc;
 
+  $self->_valid_image("write")
+    or return;
+
   $self->_set_opts(\%input, "i_", $self)
     or return undef;
 
-  unless ($self->{IMG}) { $self->{ERRSTR}='empty input image'; return undef; }
-
-  if (!$input{'type'} and $input{file}) { 
-    $input{'type'}=$FORMATGUESS->($input{file});
+  my $type = $input{'type'};
+  if (!$type and $input{file}) { 
+    $type = $FORMATGUESS->($input{file});
   }
-  if (!$input{'type'}) { 
+  unless ($type) { 
     $self->{ERRSTR}='type parameter missing and not possible to guess from extension';
     return undef;
   }
 
-  _writer_autoload($input{type});
+  _writer_autoload($type);
 
   my ($IO, $fh);
-  if ($writers{$input{type}} && $writers{$input{type}}{single}) {
-    ($IO, $fh) = $self->_get_writer_io(\%input, $input{'type'})
+  if ($writers{$type} && $writers{$type}{single}) {
+    ($IO, $fh) = $self->_get_writer_io(\%input)
       or return undef;
 
-    $writers{$input{type}}{single}->($self, $IO, %input)
+    $writers{$type}{single}->($self, $IO, %input, type => $type)
       or return undef;
   }
   else {
-    if (!$formats_low{$input{'type'}}) { 
+    if (!$formats_low{$type}) { 
       my $write_types = join ', ', sort Imager->write_types();
-      $self->_set_error("format '$input{'type'}' not supported - formats $write_types available for writing");
+      $self->_set_error("format '$type' not supported - formats $write_types available for writing - $writer_load_errors{$type}");
       return undef;
     }
     
-    ($IO, $fh) = $self->_get_writer_io(\%input, $input{'type'})
+    ($IO, $fh) = $self->_get_writer_io(\%input, $type)
       or return undef;
-    
-    if ( $input{'type'} eq 'pnm' ) {
+  
+    if ( $type eq 'pnm' ) {
       $self->_set_opts(\%input, "pnm_", $self)
         or return undef;
       if ( ! i_writeppm_wiol($self->{IMG},$IO) ) {
@@ -1729,7 +1861,8 @@ sub write {
         return undef;
       }
       $self->{DEBUG} && print "writing a pnm file\n";
-    } elsif ( $input{'type'} eq 'raw' ) {
+    }
+    elsif ( $type eq 'raw' ) {
       $self->_set_opts(\%input, "raw_", $self)
         or return undef;
       if ( !i_writeraw_wiol($self->{IMG},$IO) ) {
@@ -1737,17 +1870,8 @@ sub write {
         return undef;
       }
       $self->{DEBUG} && print "writing a raw file\n";
-    } elsif ( $input{'type'} eq 'jpeg' ) {
-      $self->_set_opts(\%input, "jpeg_", $self)
-        or return undef;
-      $self->_set_opts(\%input, "exif_", $self)
-        or return undef;
-      if ( !i_writejpeg_wiol($self->{IMG}, $IO, $input{jpegquality})) {
-        $self->{ERRSTR} = $self->_error_as_msg();
-        return undef;
-      }
-      $self->{DEBUG} && print "writing a jpeg file\n";
-    } elsif ( $input{'type'} eq 'bmp' ) {
+    }
+    elsif ( $type eq 'bmp' ) {
       $self->_set_opts(\%input, "bmp_", $self)
         or return undef;
       if ( !i_writebmp_wiol($self->{IMG}, $IO) ) {
@@ -1755,7 +1879,8 @@ sub write {
         return undef;
       }
       $self->{DEBUG} && print "writing a bmp file\n";
-    } elsif ( $input{'type'} eq 'tga' ) {
+    }
+    elsif ( $type eq 'tga' ) {
       $self->_set_opts(\%input, "tga_", $self)
         or return undef;
       
@@ -1764,24 +1889,6 @@ sub write {
         return undef;
       }
       $self->{DEBUG} && print "writing a tga file\n";
-    } elsif ( $input{'type'} eq 'gif' ) {
-      $self->_set_opts(\%input, "gif_", $self)
-        or return undef;
-      # compatibility with the old interfaces
-      if ($input{gifquant} eq 'lm') {
-        $input{make_colors} = 'addi';
-        $input{translate} = 'perturb';
-        $input{perturb} = $input{lmdither};
-      } elsif ($input{gifquant} eq 'gen') {
-        # just pass options through
-      } else {
-        $input{make_colors} = 'webmap'; # ignored
-        $input{translate} = 'giflib';
-      }
-      if (!i_writegif_wiol($IO, \%input, $self->{IMG})) {
-        $self->{ERRSTR} = $self->_error_as_msg;
-        return;
-      }
     }
   }
 
@@ -1809,9 +1916,13 @@ sub write_multi {
     return;
   }
   # translate to ImgRaw
-  if (grep !UNIVERSAL::isa($_, 'Imager') || !$_->{IMG}, @images) {
-    $class->_set_error('Usage: Imager->write_multi({ options }, @images)');
-    return 0;
+  my $index = 1;
+  for my $img (@images) {
+    unless ($img->_valid_image("write_multi")) {
+      $class->_set_error($img->errstr . " (image $index)");
+      return;
+    }
+    ++$index;
   }
   $class->_set_opts($opts, "i_", @images)
     or return;
@@ -1881,7 +1992,9 @@ sub read_multi {
   }
 
   unless ($type) {
-    $ERRSTR = "No type parameter supplied and it couldn't be guessed";
+    my $msg = "type parameter missing and it couldn't be determined from the file contents";
+    $opts{file} and $msg .= " or file name";
+    Imager->_set_error($msg);
     return;
   }
 
@@ -1943,7 +2056,9 @@ sub filter {
   my $self=shift;
   my %input=@_;
   my %hsh;
-  unless ($self->{IMG}) { $self->{ERRSTR}='empty input image'; return undef; }
+
+  $self->_valid_image("filter")
+    or return;
 
   if (!$input{'type'}) { $self->{ERRSTR}='type parameter missing'; return undef; }
 
@@ -2118,10 +2233,8 @@ sub scale {
     return;
   }
 
-  unless ($self->{IMG}) { 
-    $self->_set_error('empty input image'); 
-    return undef;
-  }
+  $self->_valid_image("scale")
+    or return;
 
   my ($x_scale, $y_scale, $new_width, $new_height) = 
     $self->scale_calculate(%opts)
@@ -2175,10 +2288,8 @@ sub scaleX {
     return;
   }
 
-  unless ($self->{IMG}) { 
-    $self->{ERRSTR} = 'empty input image';
-    return undef;
-  }
+  $self->_valid_image("scaleX")
+    or return;
 
   my $img = Imager->new();
 
@@ -2215,7 +2326,8 @@ sub scaleY {
     return;
   }
 
-  unless ($self->{IMG}) { $self->{ERRSTR}='empty input image'; return undef; }
+  $self->_valid_image("scaleY")
+    or return;
 
   my $img = Imager->new();
 
@@ -2246,12 +2358,14 @@ sub scaleY {
 
 sub transform {
   my $self=shift;
-  unless ($self->{IMG}) { $self->{ERRSTR}='empty input image'; return undef; }
   my %opts=@_;
   my (@op,@ropx,@ropy,$iop,$or,@parm,$expr,@xt,@yt,@pt,$numre);
 
 #  print Dumper(\%opts);
 #  xopcopdes
+
+  $self->_valid_image("transform")
+    or return;
 
   if ( $opts{'xexpr'} and $opts{'yexpr'} ) {
     if (!$I2P) {
@@ -2344,6 +2458,15 @@ sub transform2 {
   $opts->{variables} = [ qw(x y) ];
   my ($width, $height) = @{$opts}{qw(width height)};
   if (@imgs) {
+    my $index = 1;
+    for my $img (@imgs) {
+      unless ($img->_valid_image("transform2")) {
+	Imager->_set_error($img->errstr . " (input image $index)");
+	return;
+      }
+      ++$index;
+    }
+
     $width ||= $imgs[0]->getwidth();
     $height ||= $imgs[0]->getheight();
     my $img_num = 1;
@@ -2398,13 +2521,12 @@ sub rubthrough {
   my $self=shift;
   my %opts= @_;
 
-  unless ($self->{IMG}) { 
-    $self->{ERRSTR}='empty input image'; 
-    return undef;
-  }
-  unless ($opts{src} && $opts{src}->{IMG}) {
-    $self->{ERRSTR}='empty input image for src'; 
-    return undef;
+  $self->_valid_image("rubthrough")
+    or return;
+
+  unless ($opts{src} && $opts{src}->_valid_image("rubthrough")) {
+    $self->{ERRSTR} = $opts{src}{ERRSTR} . ' (for src)';
+    return;
   }
 
   %opts = (src_minx => 0,
@@ -2441,18 +2563,16 @@ sub compose {
      @_
     );
 
-  unless ($self->{IMG}) {
-    $self->_set_error("compose: empty input image");
-    return;
-  }
+  $self->_valid_image("compose")
+    or return;
 
   unless ($opts{src}) {
     $self->_set_error("compose: src parameter missing");
     return;
   }
   
-  unless ($opts{src}{IMG}) {
-    $self->_set_error("compose: src parameter empty image");
+  unless ($opts{src}->_valid_image("compose")) {
+    $self->_set_error($opts{src}->errstr . " (for src)");
     return;
   }
   my $src = $opts{src};
@@ -2488,8 +2608,8 @@ sub compose {
   my $combine = $self->_combine($opts{combine}, 'normal');
 
   if ($opts{mask}) {
-    unless ($opts{mask}{IMG}) {
-      $self->_set_error("compose: mask parameter empty image");
+    unless ($opts{mask}->_valid_image("compose")) {
+      $self->_set_error($opts{mask}->errstr . " (for mask)");
       return;
     }
 
@@ -2501,16 +2621,20 @@ sub compose {
     defined $mask_top or $mask_top = $opts{mask_miny};
     defined $mask_top or $mask_top = 0;
 
-    i_compose_mask($self->{IMG}, $src->{IMG}, $opts{mask}{IMG}, 
+    unless (i_compose_mask($self->{IMG}, $src->{IMG}, $opts{mask}{IMG}, 
 		   $left, $top, $src_left, $src_top,
 		   $mask_left, $mask_top, $width, $height, 
-		   $combine, $opts{opacity})
-      or return;
+			   $combine, $opts{opacity})) {
+      $self->_set_error(Imager->_error_as_msg);
+      return;
+    }
   }
   else {
-    i_compose($self->{IMG}, $src->{IMG}, $left, $top, $src_left, $src_top,
-	      $width, $height, $combine, $opts{opacity})
-      or return;
+    unless (i_compose($self->{IMG}, $src->{IMG}, $left, $top, $src_left, $src_top,
+		      $width, $height, $combine, $opts{opacity})) {
+      $self->_set_error(Imager->_error_as_msg);
+      return;
+    }
   }
 
   return $self;
@@ -2519,6 +2643,10 @@ sub compose {
 sub flip {
   my $self  = shift;
   my %opts  = @_;
+
+  $self->_valid_image("flip")
+    or return;
+
   my %xlate = (h=>0, v=>1, hv=>2, vh=>2);
   my $dir;
   return () unless defined $opts{'dir'} and defined $xlate{$opts{'dir'}};
@@ -2536,6 +2664,9 @@ sub rotate {
     warn "rotate() called in void context - rotate() returns the rotated image at $caller[1] line $caller[2]\n";
     return;
   }
+
+  $self->_valid_image("rotate")
+    or return;
 
   if (defined $opts{right}) {
     my $degrees = $opts{right};
@@ -2562,7 +2693,7 @@ sub rotate {
     }
   }
   elsif (defined $opts{radians} || defined $opts{degrees}) {
-    my $amount = $opts{radians} || $opts{degrees} * 3.1415926535 / 180;
+    my $amount = $opts{radians} || $opts{degrees} * 3.14159265358979 / 180;
 
     my $back = $opts{back};
     my $result = Imager->new;
@@ -2595,6 +2726,9 @@ sub rotate {
 sub matrix_transform {
   my $self = shift;
   my %opts = @_;
+
+  $self->_valid_image("matrix_transform")
+    or return;
 
   unless (defined wantarray) {
     my @caller = caller;
@@ -2644,10 +2778,8 @@ sub box {
   my $self=shift;
   my $raw = $self->{IMG};
 
-  unless ($raw) {
-    $self->{ERRSTR}='empty input image';
-    return undef;
-  }
+  $self->_valid_image("box")
+    or return;
 
   my %opts = @_;
 
@@ -2681,7 +2813,12 @@ sub box {
       $color = i_color_new(255,255,255,255);
     }
 
-    i_box_filled($raw, $xmin, $ymin,$xmax, $ymax, $color);
+    if ($color->isa("Imager::Color")) {
+      i_box_filled($raw, $xmin, $ymin,$xmax, $ymax, $color);
+    }
+    else {
+      i_box_filledf($raw, $xmin, $ymin,$xmax, $ymax, $color);
+    }
   }
   elsif ($opts{fill}) {
     unless (UNIVERSAL::isa($opts{fill}, 'Imager::Fill')) {
@@ -2720,7 +2857,10 @@ sub box {
 
 sub arc {
   my $self=shift;
-  unless ($self->{IMG}) { $self->{ERRSTR}='empty input image'; return undef; }
+
+  $self->_valid_image("arc")
+    or return;
+
   my $dflcl= [ 255, 255, 255, 255];
   my $good = 1;
   my %opts=
@@ -2822,7 +2962,9 @@ sub line {
   my %opts=(color=>$dflcl,
 	    endp => 1,
 	    @_);
-  unless ($self->{IMG}) { $self->{ERRSTR}='empty input image'; return undef; }
+
+  $self->_valid_image("line")
+    or return;
 
   unless (exists $opts{x1} and exists $opts{y1}) { $self->{ERRSTR}='missing begining coord'; return undef; }
   unless (exists $opts{x2} and exists $opts{y2}) { $self->{ERRSTR}='missing ending coord'; return undef; }
@@ -2853,7 +2995,8 @@ sub polyline {
   my $dflcl=i_color_new(0,0,0,0);
   my %opts=(color=>$dflcl,@_);
 
-  unless ($self->{IMG}) { $self->{ERRSTR}='empty input image'; return undef; }
+  $self->_valid_image("polyline")
+    or return;
 
   if (exists($opts{points})) { @points=@{$opts{points}}; }
   if (!exists($opts{points}) and exists($opts{'x'}) and exists($opts{'y'}) ) {
@@ -2892,7 +3035,8 @@ sub polygon {
   my $dflcl = i_color_new(0,0,0,0);
   my %opts = (color=>$dflcl, @_);
 
-  unless ($self->{IMG}) { $self->{ERRSTR}='empty input image'; return undef; }
+  $self->_valid_image("polygon")
+    or return;
 
   if (exists($opts{points})) {
     $opts{'x'} = [ map { $_->[0] } @{$opts{points}} ];
@@ -2939,7 +3083,8 @@ sub polybezier {
   my $dflcl=i_color_new(0,0,0,0);
   my %opts=(color=>$dflcl,@_);
 
-  unless ($self->{IMG}) { $self->{ERRSTR}='empty input image'; return undef; }
+  $self->_valid_image("polybezier")
+    or return;
 
   if (exists $opts{points}) {
     $opts{'x'}=map { $_->[0]; } @{$opts{'points'}};
@@ -2964,6 +3109,9 @@ sub flood_fill {
   my $self = shift;
   my %opts = ( color=>Imager::Color->new(255, 255, 255), @_ );
   my $rc;
+
+  $self->_valid_image("flood_fill")
+    or return;
 
   unless (exists $opts{'x'} && exists $opts{'y'}) {
     $self->{ERRSTR} = "missing seed x and y parameters";
@@ -3038,6 +3186,9 @@ sub flood_fill {
 sub setpixel {
   my ($self, %opts) = @_;
 
+  $self->_valid_image("setpixel")
+    or return;
+
   my $color = $opts{color};
   unless (defined $color) {
     $color = $self->{fg};
@@ -3045,36 +3196,53 @@ sub setpixel {
   }
 
   unless (ref $color && UNIVERSAL::isa($color, "Imager::Color")) {
-    $color = _color($color)
-      or return undef;
+    unless ($color = _color($color, 'setpixel')) {
+      $self->_set_error("setpixel: " . Imager->errstr);
+      return;
+    }
   }
 
   unless (exists $opts{'x'} && exists $opts{'y'}) {
-    $self->{ERRSTR} = 'missing x and y parameters';
-    return undef;
+    $self->_set_error('setpixel: missing x or y parameter');
+    return;
   }
 
   my $x = $opts{'x'};
   my $y = $opts{'y'};
-  if (ref $x && ref $y) {
-    unless (@$x == @$y) {
-      $self->{ERRSTR} = 'length of x and y mismatch';
+  if (ref $x || ref $y) {
+    $x = ref $x ? $x : [ $x ];
+    $y = ref $y ? $y : [ $y ];
+    unless (@$x) {
+      $self->_set_error("setpixel: x is a reference to an empty array");
       return;
     }
+    unless (@$y) {
+      $self->_set_error("setpixel: y is a reference to an empty array");
+      return;
+    }
+
+    # make both the same length, replicating the last element
+    if (@$x < @$y) {
+      $x = [ @$x, ($x->[-1]) x (@$y - @$x) ];
+    }
+    elsif (@$y < @$x) {
+      $y = [ @$y, ($y->[-1]) x (@$x - @$y) ];
+    }
+
     my $set = 0;
     if ($color->isa('Imager::Color')) {
-      for my $i (0..$#{$opts{'x'}}) {
+      for my $i (0..$#$x) {
         i_ppix($self->{IMG}, $x->[$i], $y->[$i], $color)
 	  or ++$set;
       }
     }
     else {
-      for my $i (0..$#{$opts{'x'}}) {
+      for my $i (0..$#$x) {
         i_ppixf($self->{IMG}, $x->[$i], $y->[$i], $color)
 	  or ++$set;
       }
     }
-    $set or return;
+
     return $set;
   }
   else {
@@ -3088,7 +3256,7 @@ sub setpixel {
     }
   }
 
-  $self;
+  return $self;
 }
 
 sub getpixel {
@@ -3096,48 +3264,74 @@ sub getpixel {
 
   my %opts = ( "type"=>'8bit', @_);
 
+  $self->_valid_image("getpixel")
+    or return;
+
   unless (exists $opts{'x'} && exists $opts{'y'}) {
-    $self->{ERRSTR} = 'missing x and y parameters';
-    return undef;
+    $self->_set_error('getpixel: missing x or y parameter');
+    return;
   }
 
   my $x = $opts{'x'};
   my $y = $opts{'y'};
-  if (ref $x && ref $y) {
-    unless (@$x == @$y) {
-      $self->{ERRSTR} = 'length of x and y mismatch';
-      return undef;
+  my $type = $opts{'type'};
+  if (ref $x || ref $y) {
+    $x = ref $x ? $x : [ $x ];
+    $y = ref $y ? $y : [ $y ];
+    unless (@$x) {
+      $self->_set_error("getpixel: x is a reference to an empty array");
+      return;
     }
+    unless (@$y) {
+      $self->_set_error("getpixel: y is a reference to an empty array");
+      return;
+    }
+
+    # make both the same length, replicating the last element
+    if (@$x < @$y) {
+      $x = [ @$x, ($x->[-1]) x (@$y - @$x) ];
+    }
+    elsif (@$y < @$x) {
+      $y = [ @$y, ($y->[-1]) x (@$x - @$y) ];
+    }
+
     my @result;
-    if ($opts{"type"} eq '8bit') {
-      for my $i (0..$#{$opts{'x'}}) {
+    if ($type eq '8bit') {
+      for my $i (0..$#$x) {
         push(@result, i_get_pixel($self->{IMG}, $x->[$i], $y->[$i]));
       }
     }
-    else {
-      for my $i (0..$#{$opts{'x'}}) {
+    elsif ($type eq 'float' || $type eq 'double') {
+      for my $i (0..$#$x) {
         push(@result, i_gpixf($self->{IMG}, $x->[$i], $y->[$i]));
       }
+    }
+    else {
+      $self->_set_error("getpixel: type must be '8bit' or 'float'");
+      return;
     }
     return wantarray ? @result : \@result;
   }
   else {
-    if ($opts{"type"} eq '8bit') {
+    if ($type eq '8bit') {
       return i_get_pixel($self->{IMG}, $x, $y);
     }
-    else {
+    elsif ($type eq 'float' || $type eq 'double') {
       return i_gpixf($self->{IMG}, $x, $y);
     }
+    else {
+      $self->_set_error("getpixel: type must be '8bit' or 'float'");
+      return;
+    }
   }
-
-  $self;
 }
 
 sub getscanline {
   my $self = shift;
   my %opts = ( type => '8bit', x=>0, @_);
 
-  $self->_valid_image or return;
+  $self->_valid_image("getscanline")
+    or return;
 
   defined $opts{width} or $opts{width} = $self->getwidth - $opts{x};
 
@@ -3172,7 +3366,8 @@ sub setscanline {
   my $self = shift;
   my %opts = ( x=>0, @_);
 
-  $self->_valid_image or return;
+  $self->_valid_image("setscanline")
+    or return;
 
   unless (defined $opts{'y'}) {
     $self->_set_error("missing y parameter");
@@ -3233,6 +3428,9 @@ sub getsamples {
   my $self = shift;
   my %opts = ( type => '8bit', x=>0, offset => 0, @_);
 
+  $self->_valid_image("getsamples")
+    or return;
+
   defined $opts{width} or $opts{width} = $self->getwidth - $opts{x};
 
   unless (defined $opts{'y'}) {
@@ -3240,24 +3438,20 @@ sub getsamples {
     return;
   }
   
-  unless ($opts{channels}) {
-    $opts{channels} = [ 0 .. $self->getchannels()-1 ];
-  }
-
   if ($opts{target}) {
     my $target = $opts{target};
     my $offset = $opts{offset};
     if ($opts{type} eq '8bit') {
       my @samples = i_gsamp($self->{IMG}, $opts{x}, $opts{x}+$opts{width},
-			    $opts{y}, @{$opts{channels}})
+			    $opts{y}, $opts{channels})
 	or return;
-      @{$target}{$offset .. $offset + @samples - 1} = @samples;
+      @{$target}[$offset .. $offset + @samples - 1] = @samples;
       return scalar(@samples);
     }
     elsif ($opts{type} eq 'float') {
       my @samples = i_gsampf($self->{IMG}, $opts{x}, $opts{x}+$opts{width},
-			     $opts{y}, @{$opts{channels}});
-      @{$target}{$offset .. $offset + @samples - 1} = @samples;
+			     $opts{y}, $opts{channels});
+      @{$target}[$offset .. $offset + @samples - 1] = @samples;
       return scalar(@samples);
     }
     elsif ($opts{type} =~ /^(\d+)bit$/) {
@@ -3266,7 +3460,7 @@ sub getsamples {
       my @data;
       my $count = i_gsamp_bits($self->{IMG}, $opts{x}, $opts{x}+$opts{width}, 
 			       $opts{y}, $bits, $target, 
-			       $offset, @{$opts{channels}});
+			       $offset, $opts{channels});
       unless (defined $count) {
 	$self->_set_error(Imager->_error_as_msg);
 	return;
@@ -3282,18 +3476,18 @@ sub getsamples {
   else {
     if ($opts{type} eq '8bit') {
       return i_gsamp($self->{IMG}, $opts{x}, $opts{x}+$opts{width},
-		     $opts{y}, @{$opts{channels}});
+		     $opts{y}, $opts{channels});
     }
     elsif ($opts{type} eq 'float') {
       return i_gsampf($self->{IMG}, $opts{x}, $opts{x}+$opts{width},
-		      $opts{y}, @{$opts{channels}});
+		      $opts{y}, $opts{channels});
     }
     elsif ($opts{type} =~ /^(\d+)bit$/) {
       my $bits = $1;
 
       my @data;
       i_gsamp_bits($self->{IMG}, $opts{x}, $opts{x}+$opts{width}, 
-		   $opts{y}, $bits, \@data, 0, @{$opts{channels}})
+		   $opts{y}, $bits, \@data, 0, $opts{channels})
 	or return;
       return @data;
     }
@@ -3306,35 +3500,66 @@ sub getsamples {
 
 sub setsamples {
   my $self = shift;
-  my %opts = ( x => 0, offset => 0, @_ );
 
-  unless ($self->{IMG}) {
-    $self->_set_error('setsamples: empty input image');
+  $self->_valid_image("setsamples")
+    or return;
+
+  my %opts = ( x => 0, offset => 0 );
+  my $data_index;
+  # avoid duplicating the data parameter, it may be a large scalar
+  my $i = 0;
+  while ($i < @_ -1) {
+    if ($_[$i] eq 'data') {
+      $data_index = $i+1;
+    }
+    else {
+      $opts{$_[$i]} = $_[$i+1];
+    }
+
+    $i += 2;
+  }
+
+  unless(defined $data_index) {
+    $self->_set_error('setsamples: data parameter missing');
+    return;
+  }
+  unless (defined $_[$data_index]) {
+    $self->_set_error('setsamples: data parameter not defined');
     return;
   }
 
-  unless(defined $opts{data} && ref $opts{data}) {
-    $self->_set_error('setsamples: data parameter missing or invalid');
+  my $type = $opts{type};
+  defined $type or $type = '8bit';
+
+  my $width = defined $opts{width} ? $opts{width}
+    : $self->getwidth() - $opts{x};
+
+  my $count;
+  if ($type eq '8bit') {
+    $count = i_psamp($self->{IMG}, $opts{x}, $opts{y}, $opts{channels},
+		     $_[$data_index], $opts{offset}, $width);
+  }
+  elsif ($type eq 'float') {
+    $count = i_psampf($self->{IMG}, $opts{x}, $opts{y}, $opts{channels},
+		      $_[$data_index], $opts{offset}, $width);
+  }
+  elsif ($type =~ /^([0-9]+)bit$/) {
+    my $bits = $1;
+
+    unless (ref $_[$data_index]) {
+      $self->_set_error("setsamples: data must be an array ref for type not 8bit or float");
+      return;
+    }
+
+    $count = i_psamp_bits($self->{IMG}, $opts{x}, $opts{y}, $bits,
+			  $opts{channels}, $_[$data_index], $opts{offset}, 
+			  $width);
+  }
+  else {
+    $self->_set_error('setsamples: type parameter invalid');
     return;
   }
 
-  unless ($opts{channels}) {
-    $opts{channels} = [ 0 .. $self->getchannels()-1 ];
-  }
-
-  unless ($opts{type} && $opts{type} =~ /^(\d+)bit$/) {
-    $self->_set_error('setsamples: type parameter missing or invalid');
-    return;
-  }
-  my $bits = $1;
-
-  unless (defined $opts{width}) {
-    $opts{width} = $self->getwidth() - $opts{x};
-  }
-
-  my $count = i_psamp_bits($self->{IMG}, $opts{x}, $opts{y}, $bits,
-			   $opts{channels}, $opts{data}, $opts{offset}, 
-			   $opts{width});
   unless (defined $count) {
     $self->_set_error(Imager->_error_as_msg);
     return;
@@ -3358,6 +3583,9 @@ sub _identity {
 sub convert {
   my ($self, %opts) = @_;
   my $matrix;
+
+  $self->_valid_image("convert")
+    or return;
 
   unless (defined wantarray) {
     my @caller = caller;
@@ -3454,6 +3682,7 @@ sub convert {
   $new->{IMG} = i_convert($self->{IMG}, $matrix);
   unless ($new->{IMG}) {
     # most likely a bad matrix
+    i_push_error(0, "convert");
     $self->{ERRSTR} = _error_as_msg();
     return undef;
   }
@@ -3476,8 +3705,8 @@ sub combine {
       $class->_set_error("src must contain image objects");
       return;
     }
-    unless ($img->{IMG}) {
-      $class->_set_error("empty input image");
+    unless ($img->_valid_image("combine")) {
+      $Imager::ERRSTR = $img->{ERRSTR} . " (src->[$index])";
       return;
     }
     push @imgs, $img->{IMG};
@@ -3507,6 +3736,9 @@ sub map {
   my ($self, %opts) = @_;
   my @chlist = qw( red green blue alpha );
 
+  $self->_valid_image("map")
+    or return;
+
   if (!exists($opts{'maps'})) {
     # make maps from channel maps
     my $chnum;
@@ -3527,15 +3759,17 @@ sub map {
 sub difference {
   my ($self, %opts) = @_;
 
+  $self->_valid_image("difference")
+    or return;
+
   defined $opts{mindist} or $opts{mindist} = 0;
 
   defined $opts{other}
     or return $self->_set_error("No 'other' parameter supplied");
-  defined $opts{other}{IMG}
-    or return $self->_set_error("No image data in 'other' image");
-
-  $self->{IMG}
-    or return $self->_set_error("No image data");
+  unless ($opts{other}->_valid_image("difference")) {
+    $self->_set_error($opts{other}->errstr . " (other image)");
+    return;
+  }
 
   my $result = Imager->new;
   $result->{IMG} = i_diff_image($self->{IMG}, $opts{other}{IMG}, 
@@ -3559,12 +3793,10 @@ sub border {
 sub getwidth {
   my $self = shift;
 
-  if (my $raw = $self->{IMG}) {
-    return i_img_get_width($raw);
-  }
-  else {
-    $self->{ERRSTR} = 'image is empty'; return undef;
-  }
+  $self->_valid_image("getwidth")
+    or return;
+
+  return i_img_get_width($self->{IMG});
 }
 
 # Get the height of an image
@@ -3572,19 +3804,20 @@ sub getwidth {
 sub getheight {
   my $self = shift;
 
-  if (my $raw = $self->{IMG}) {
-    return i_img_get_height($raw);
-  }
-  else {
-    $self->{ERRSTR} = 'image is empty'; return undef;
-  }
+  $self->_valid_image("getheight")
+    or return;
+
+  return i_img_get_height($self->{IMG});
 }
 
 # Get number of channels in an image
 
 sub getchannels {
   my $self = shift;
-  if (!defined($self->{IMG})) { $self->{ERRSTR} = 'image is empty'; return undef; }
+
+  $self->_valid_image("getchannels")
+    or return;
+
   return i_img_getchannels($self->{IMG});
 }
 
@@ -3592,7 +3825,10 @@ sub getchannels {
 
 sub getmask {
   my $self = shift;
-  if (!defined($self->{IMG})) { $self->{ERRSTR} = 'image is empty'; return undef; }
+
+  $self->_valid_image("getmask")
+    or return;
+
   return i_img_getmask($self->{IMG});
 }
 
@@ -3601,14 +3837,15 @@ sub getmask {
 sub setmask {
   my $self = shift;
   my %opts = @_;
-  if (!defined($self->{IMG})) { 
-    $self->{ERRSTR} = 'image is empty';
-    return undef;
-  }
+
+  $self->_valid_image("setmask")
+    or return;
+
   unless (defined $opts{mask}) {
     $self->_set_error("mask parameter required");
     return;
   }
+
   i_img_setmask( $self->{IMG} , $opts{mask} );
 
   1;
@@ -3619,7 +3856,10 @@ sub setmask {
 sub getcolorcount {
   my $self=shift;
   my %opts=('maxcolors'=>2**30,@_);
-  if (!defined($self->{IMG})) { $self->{ERRSTR}='image is empty'; return undef; }
+
+  $self->_valid_image("getcolorcount")
+    or return;
+
   my $rc=i_count_colors($self->{IMG},$opts{'maxcolors'});
   return ($rc==-1? undef : $rc);
 }
@@ -3628,16 +3868,14 @@ sub getcolorcount {
 # values are the number of pixels in this colour.
 sub getcolorusagehash {
   my $self = shift;
-  
+
+  $self->_valid_image("getcolorusagehash")
+    or return;
+
   my %opts = ( maxcolors => 2**30, @_ );
   my $max_colors = $opts{maxcolors};
   unless (defined $max_colors && $max_colors > 0) {
     $self->_set_error('maxcolors must be a positive integer');
-    return;
-  }
-
-  unless (defined $self->{IMG}) {
-    $self->_set_error('empty input image'); 
     return;
   }
 
@@ -3664,16 +3902,14 @@ sub getcolorusagehash {
 sub getcolorusage {
   my $self = shift;
 
+  $self->_valid_image("getcolorusage")
+    or return;
+
   my %opts = ( maxcolors => 2**30, @_ );
   my $max_colors = $opts{maxcolors};
   unless (defined $max_colors && $max_colors > 0) {
     $self->_set_error('maxcolors must be a positive integer');
     return;
-  }
-
-  unless (defined $self->{IMG}) {
-    $self->_set_error('empty input image'); 
-    return undef;
   }
 
   return i_get_anonymous_color_histo($self->{IMG}, $max_colors);
@@ -3683,7 +3919,9 @@ sub getcolorusage {
 
 sub string {
   my $self = shift;
-  unless ($self->{IMG}) { $self->{ERRSTR}='empty input image'; return undef; }
+
+  $self->_valid_image("string")
+    or return;
 
   my %input=('x'=>0, 'y'=>0, @_);
   defined($input{string}) or $input{string} = $input{text};
@@ -3710,10 +3948,9 @@ sub align_string {
 
   my $img;
   if (ref $self) {
-    unless ($self->{IMG}) { 
-      $self->{ERRSTR}='empty input image'; 
-      return;
-    }
+    $self->_valid_image("align_string")
+      or return;
+
     $img = $self;
   }
   else {
@@ -3768,6 +4005,41 @@ sub get_file_limits {
   i_get_image_file_limits();
 }
 
+my @check_args = qw(width height channels sample_size);
+
+sub check_file_limits {
+  my $class = shift;
+
+  my %opts =
+    (
+     channels => 3,
+     sample_size => 1,
+     @_,
+    );
+
+  if ($opts{sample_size} && $opts{sample_size} eq 'float') {
+    $opts{sample_size} = length(pack("d", 0));
+  }
+
+  for my $name (@check_args) {
+    unless (defined $opts{$name}) {
+      $class->_set_error("check_file_limits: $name must be defined");
+      return;
+    }
+    unless ($opts{$name} == int($opts{$name})) {
+      $class->_set_error("check_file_limits: $name must be a positive integer");
+      return;
+    }
+  }
+
+  my $result = i_int_check_image_file_limits(@opts{@check_args});
+  unless ($result) {
+    $class->_set_error($class->_error_as_msg());
+  }
+
+  return $result;
+}
+
 # Shortcuts that can be exported
 
 sub newcolor { Imager::Color->new(@_); }
@@ -3804,21 +4076,39 @@ sub _set_error {
 
 # Default guess for the type of an image from extension
 
+my @simple_types = qw(png tga gif raw ico cur xpm mng jng ilbm pcx psd eps);
+
+my %ext_types =
+  (
+   ( map { $_ => $_ } @simple_types ),
+   tiff => "tiff",
+   tif => "tiff",
+   pbm => "pnm",
+   pgm => "pnm",
+   ppm => "pnm",
+   pnm => "pnm", # technically wrong, but historically it works in Imager
+   jpeg => "jpeg",
+   jpg => "jpeg",
+   bmp => "bmp",
+   dib => "bmp",
+   rgb => "sgi",
+   bw => "sgi",
+   sgi => "sgi",
+   fit => "fits",
+   fits => "fits",
+   rle => "utah",
+  );
+
 sub def_guess_type {
   my $name=lc(shift);
-  my $ext;
-  $ext=($name =~ m/\.([^\.]+)$/)[0];
-  return 'tiff' if ($ext =~ m/^tiff?$/);
-  return 'jpeg' if ($ext =~ m/^jpe?g$/);
-  return 'pnm'  if ($ext =~ m/^p[pgb]m$/);
-  return 'png'  if ($ext eq "png");
-  return 'bmp'  if ($ext eq "bmp" || $ext eq "dib");
-  return 'tga'  if ($ext eq "tga");
-  return 'sgi'  if ($ext eq "rgb" || $ext eq "bw" || $ext eq "sgi" || $ext eq "rgba");
-  return 'gif'  if ($ext eq "gif");
-  return 'raw'  if ($ext eq "raw");
-  return lc $ext; # best guess
-  return ();
+
+  my ($ext) = $name =~ /\.([^.]+)$/
+    or return;
+
+  my $type = $ext_types{$ext}
+    or return;
+
+  return $type;
 }
 
 sub combines {
@@ -3909,7 +4199,7 @@ sub Imager::ImgRaw::CLONE_SKIP { 1 }
 
 sub preload {
   # this serves two purposes:
-  # - a class method to load the file support modules included with Image
+  # - a class method to load the file support modules included with Imager
   #   (or were included, once the library dependent modules are split out)
   # - something for Module::ScanDeps to analyze
   # https://rt.cpan.org/Ticket/Display.html?id=6566
@@ -3944,10 +4234,16 @@ sub _check {
 
   (my $file = $self->[IX_CLASSES]{$key} . ".pm") =~ s(::)(/)g;
   my $value;
-  if (eval { require $file; 1 }) {
+  my $error;
+  my $loaded = Imager::_load_file($file, \$error);
+  if ($loaded) {
     $value = 1;
   }
   else {
+    if ($error =~ /^Can't locate /) {
+      $error = "Can't locate $file";
+    }
+    $reader_load_errors{$key} = $writer_load_errors{$key} = $error;
     $value = undef;
   }
   $self->[IX_FORMATS]{$key} = $value;
@@ -4173,6 +4469,14 @@ L<Imager::Inline> - using Imager's C API from Inline::C
 
 L<Imager::ExtUtils> - tools to get access to Imager's C API.
 
+=item *
+
+L<Imager::Security> - brief security notes.
+
+=item *
+
+L<Imager::Threads> - brief information on working with threads.
+
 =back
 
 =head2 Basic Overview
@@ -4242,7 +4546,12 @@ image
 
 box() - L<Imager::Draw/box()> - draw a filled or outline box.
 
+check_file_limits() - L<Imager::Files/check_file_limits()>
+
 circle() - L<Imager::Draw/circle()> - draw a filled circle
+
+close_log() - L<Imager::ImageTypes/close_log()> - close the Imager
+debugging log.
 
 colorcount() - L<Imager::ImageTypes/colorcount()> - the number of
 colors in an image's palette (paletted images only)
@@ -4256,8 +4565,8 @@ different combine type keywords
 compose() - L<Imager::Transformations/compose()> - compose one image
 over another.
 
-convert() - L<Imager::Transformations/"Color transformations"> -
-transform the color space
+convert() - L<Imager::Transformations/convert()> - transform the color
+space
 
 copy() - L<Imager::Transformations/copy()> - make a duplicate of an
 image
@@ -4269,13 +4578,12 @@ used to guess the output file format based on the output file name
 
 deltag() -  L<Imager::ImageTypes/deltag()> - delete image tags
 
-difference() - L<Imager::Filters/"Image Difference"> - produce a
-difference images from two input images.
+difference() - L<Imager::Filters/difference()> - produce a difference
+images from two input images.
 
-errstr() - L</"Basic Overview"> - the error from the last failed
-operation.
+errstr() - L</errstr()> - the error from the last failed operation.
 
-filter() - L<Imager::Filters> - image filtering
+filter() - L<Imager::Filters/filter()> - image filtering
 
 findcolor() - L<Imager::ImageTypes/findcolor()> - search the image
 palette, if it has one
@@ -4299,9 +4607,9 @@ getcolorusage() - L<Imager::ImageTypes/getcolorusage()>
 
 getcolorusagehash() - L<Imager::ImageTypes/getcolorusagehash()>
 
-get_file_limits() - L<Imager::Files/"Limiting the sizes of images you read">
+get_file_limits() - L<Imager::Files/get_file_limits()>
 
-getheight() - L<Imager::ImageTypes/getwidth()> - height of the image in
+getheight() - L<Imager::ImageTypes/getheight()> - height of the image in
 pixels
 
 getmask() - L<Imager::ImageTypes/getmask()> - write mask for the image
@@ -4327,11 +4635,20 @@ is_bilevel() - L<Imager::ImageTypes/is_bilevel()> - returns whether
 image write functions should write the image in their bilevel (blank
 and white, no gray levels) format
 
+is_logging() L<Imager::ImageTypes/is_logging()> - test if the debug
+log is active.
+
 line() - L<Imager::Draw/line()> - draw an interval
 
 load_plugin() - L<Imager::Filters/load_plugin()>
 
-map() - L<Imager::Transformations/"Color Mappings"> - remap color
+log() - L<Imager::ImageTypes/log()> - send a message to the debugging
+log.
+
+make_palette() - L<Imager::ImageTypes/make_palette()> - produce a
+color palette from one or more input images.
+
+map() - L<Imager::Transformations/map()> - remap color
 channel values
 
 masked() -  L<Imager::ImageTypes/masked()> - make a masked image
@@ -4354,7 +4671,9 @@ newfont() - L<Imager::Handy/newfont()>
 
 NF() - L<Imager::Handy/NF()>
 
-open() - L<Imager::Files> - an alias for read()
+open() - L<Imager::Files/read()> - an alias for read()
+
+open_log() - L<Imager::ImageTypes/open_log()> - open the debug log.
 
 =for stopwords IPTC
 
@@ -4370,9 +4689,9 @@ polyline() - L<Imager::Draw/polyline()>
 
 preload() - L<Imager::Files/preload()>
 
-read() - L<Imager::Files> - read a single image from an image file
+read() - L<Imager::Files/read()> - read a single image from an image file
 
-read_multi() - L<Imager::Files> - read multiple images from an image
+read_multi() - L<Imager::Files/read_multi()> - read multiple images from an image
 file
 
 read_types() - L<Imager::Files/read_types()> - list image types Imager
@@ -4400,7 +4719,7 @@ scaleY() - L<Imager::Transformations/scaleY()>
 setcolors() - L<Imager::ImageTypes/setcolors()> - set palette colors
 in a paletted image
 
-set_file_limits() - L<Imager::Files/"Limiting the sizes of images you read">
+set_file_limits() - L<Imager::Files/set_file_limits()>
 
 setmask() - L<Imager::ImageTypes/setmask()>
 
@@ -4422,6 +4741,9 @@ to_rgb16() - L<Imager::ImageTypes/to_rgb16()>
 
 to_rgb8() - L<Imager::ImageTypes/to_rgb8()>
 
+to_rgb_double() - L<Imager::ImageTypes/to_rgb_double()> - convert to
+double per sample image.
+
 transform() - L<Imager::Engines/"transform()">
 
 transform2() - L<Imager::Engines/"transform2()">
@@ -4433,9 +4755,9 @@ unload_plugin() - L<Imager::Filters/unload_plugin()>
 virtual() - L<Imager::ImageTypes/virtual()> - whether the image has it's own
 data
 
-write() - L<Imager::Files> - write an image to a file
+write() - L<Imager::Files/write()> - write an image to a file
 
-write_multi() - L<Imager::Files> - write multiple image to an image
+write_multi() - L<Imager::Files/write_multi()> - write multiple image to an image
 file.
 
 write_types() - L<Imager::Files/read_types()> - list image types Imager
@@ -4542,7 +4864,7 @@ matrix - L<Imager::Matrix2d>,
 L<Imager::Engines/"Matrix Transformations">,
 L<Imager::Font/transform()>
 
-metadata, image - L<Imager::ImageTypes/"Tags">
+metadata, image - L<Imager::ImageTypes/"Tags">, L<Image::ExifTool>
 
 mosaic - L<Imager::Filters/mosaic>
 
@@ -4576,6 +4898,8 @@ saving an image - L<Imager::Files>
 
 scaling - L<Imager::Transformations/scale()>
 
+security - L<Imager::Security>
+
 SGI files - L<Imager::Files/"SGI (RGB, BW)">
 
 sharpen - L<Imager::Filters/unsharpmask>, L<Imager::Filters/conv>
@@ -4594,6 +4918,8 @@ text, wrapping text in an area - L<Imager::Font::Wrap>
 
 text, measuring - L<Imager::Font/bounding_box()>, L<Imager::Font::BBox>
 
+threads - L<Imager::Threads>
+
 tiles, color - L<Imager::Filters/mosaic>
 
 transparent images - L<Imager::ImageTypes>,
@@ -4606,15 +4932,6 @@ unsharp mask - L<Imager::Filters/unsharpmask>
 watermark - L<Imager::Filters/watermark>
 
 writing an image to a file - L<Imager::Files>
-
-=head1 THREADS
-
-Imager doesn't support perl threads.
-
-Imager has limited code to prevent double frees if you create images,
-colors etc, and then create a thread, but has no code to prevent two
-threads entering Imager's error handling code, and none is likely to
-be added.
 
 =head1 SUPPORT
 
@@ -4683,16 +5000,32 @@ Tracker.
 
 =head2 Patches
 
-I accept patches, preferably against the main branch in subversion.
-You should include an explanation of the reason for why the patch is
-needed or useful.
+I accept patches, preferably against the master branch in git.  Please
+include an explanation of the reason for why the patch is needed or
+useful.
 
 Your patch should include regression tests where possible, otherwise
 it will be delayed until I get a chance to write them.
 
+To browse Imager's git repository:
+
+  http://git.imager.perl.org/imager.git
+
+or:
+
+  https://github.com/tonycoz/imager
+
+To clone:
+
+  git clone git://git.imager.perl.org/imager.git
+
+or:
+
+  git clone git://github.com/tonycoz/imager.git
+
 =head1 AUTHOR
 
-Tony Cook <tony@imager.perl.org> is the current maintainer for Imager.
+Tony Cook <tonyc@cpan.org> is the current maintainer for Imager.
 
 Arnar M. Hrafnkelsson is the original author of Imager.
 
@@ -4706,9 +5039,10 @@ Imager is licensed under the same terms as perl itself.
 =for stopwords
 makeblendedfont Fontforge
 
-A test font, FT2/fontfiles/MMOne.pfb, contains a Postscript operator
-definition copyrighted by Adobe.  See F<adobe.txt> in the source for
-license information.
+A test font, generated by the Debian packaged Fontforge,
+F<FT2/fontfiles/MMOne.pfb>, contains a Postscript operator definition
+copyrighted by Adobe.  See F<adobe.txt> in the source for license
+information.
 
 =head1 SEE ALSO
 
@@ -4724,6 +5058,12 @@ L<Affix::Infix2Postfix>(3), L<Parse::RecDescent>(3)
 
 Other perl imaging modules include:
 
-L<GD>(3), L<Image::Magick>(3), L<Graphics::Magick>(3).
+L<GD>(3), L<Image::Magick>(3), L<Graphics::Magick>(3),
+L<Prima::Image>, L<IPA>.
+
+For manipulating image metadata see L<Image::ExifTool>.
+
+If you're trying to use Imager for array processing, you should
+probably using L<PDL>.
 
 =cut

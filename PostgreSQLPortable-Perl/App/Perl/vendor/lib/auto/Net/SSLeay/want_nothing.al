@@ -3,12 +3,7 @@
 # See AutoSplit.pm.
 package Net::SSLeay;
 
-#line 1755 "blib\lib\Net\SSLeay.pm (autosplit into blib\lib\auto\Net\SSLeay\want_nothing.al)"
-# Documentation. Use `perl-root/pod/pod2html SSLeay.pm` to output html
-
-
-# ';
-
+#line 424 "blib\lib\Net\SSLeay.pm (autosplit into blib\lib\auto\Net\SSLeay\want_nothing.al)"
 ### Some methods that are macros in C
 
 sub want_nothing { want(shift) == 1 }

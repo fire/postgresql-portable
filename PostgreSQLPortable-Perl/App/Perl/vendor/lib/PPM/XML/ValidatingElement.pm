@@ -1,7 +1,6 @@
 package PPM::XML::ValidatingElement;
 use PPM::XML::Element;
-use vars qw( $VERSION @ISA );
-$VERSION = '0.01_01';
+use vars qw( @ISA );
 
 ###############################################################################
 #

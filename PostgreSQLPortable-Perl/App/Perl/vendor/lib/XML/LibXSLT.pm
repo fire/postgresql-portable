@@ -1,4 +1,4 @@
-# $Id: LibXSLT.pm 228 2009-10-07 12:25:23Z pajas $
+# $Id$
 #
 # This is free software, you may use it and distribute it under the same terms as
 # Perl itself.
@@ -25,7 +25,7 @@ use Carp;
 
 require Exporter;
 
-$VERSION = "1.70";
+$VERSION = "1.80";
 
 require DynaLoader;
 
@@ -54,13 +54,14 @@ sub new {
 # ido - perl dispatcher
 sub perl_dispatcher {
     my $func = shift;
+	my $owner_doc = shift;
     my @params = @_;
     my @perlParams;
-    
+
     my $i = 0;
     while (@params) {
         my $type = shift(@params);
-        if ($type eq 'XML::LibXML::Literal' or 
+        if ($type eq 'XML::LibXML::Literal' or
             $type eq 'XML::LibXML::Number' or
             $type eq 'XML::LibXML::Boolean')
         {
@@ -74,7 +75,7 @@ sub perl_dispatcher {
             unshift(@perlParams, $type->new(@nodes));
         }
     }
-    
+
     $func = "main::$func" unless ref($func) || $func =~ /(.+)::/;
     no strict 'refs';
     my $res = $func->(@perlParams);
@@ -263,6 +264,8 @@ sub parse_stylesheet {
                XML_LIBXSLT_READ_CB => $self->{XML_LIBXSLT_READ_CB},
                XML_LIBXSLT_CLOSE_CB => $self->{XML_LIBXSLT_CLOSE_CB},
                XML_LIBXSLT_SECPREFS => $self->{XML_LIBXSLT_SECPREFS},
+			   XML_LIBXSLT_FUNCTIONS => {},
+			   XML_LIBXSLT_ELEMENTS => {},
              };
 
     return bless $rv, "XML::LibXSLT::StylesheetWrapper";
@@ -291,6 +294,8 @@ sub parse_stylesheet_file {
                XML_LIBXSLT_READ_CB => $self->{XML_LIBXSLT_READ_CB},
                XML_LIBXSLT_CLOSE_CB => $self->{XML_LIBXSLT_CLOSE_CB},
                XML_LIBXSLT_SECPREFS => $self->{XML_LIBXSLT_SECPREFS},
+			   XML_LIBXSLT_FUNCTIONS => {},
+			   XML_LIBXSLT_ELEMENTS => {},
              };
 
     return bless $rv, "XML::LibXSLT::StylesheetWrapper";
@@ -486,12 +491,27 @@ sub transform_file {
     return $doc;
 }
 
+sub register_function
+{
+	my $self = shift;
+
+	$self->{XML_LIBXSLT_FUNCTIONS}->{"{$_[0]}$_[1]"} = [@_[0,1,2]];
+}
+
+sub register_element
+{
+	my $self = shift;
+
+	$self->{XML_LIBXSLT_ELEMENTS}->{"{$_[0]}$_[1]"} = [@_[0,1,2]];
+}
+
 sub output_string { shift->{XML_LIBXSLT_STYLESHEET}->_output_string($_[0],0) }
 sub output_as_bytes { shift->{XML_LIBXSLT_STYLESHEET}->_output_string($_[0],1) }
 sub output_as_chars { shift->{XML_LIBXSLT_STYLESHEET}->_output_string($_[0],2) }
 sub output_fh { shift->{XML_LIBXSLT_STYLESHEET}->output_fh(@_) }
 sub output_file { shift->{XML_LIBXSLT_STYLESHEET}->output_file(@_) }
 sub media_type { shift->{XML_LIBXSLT_STYLESHEET}->media_type(@_) }
+sub output_method { shift->{XML_LIBXSLT_STYLESHEET}->output_method(@_) }
 sub output_encoding { shift->{XML_LIBXSLT_STYLESHEET}->output_encoding(@_) }
 
 1;
@@ -603,27 +623,27 @@ __END__
 
 =head1 NAME
 
-XML::LibXSLT - Interface to the gnome libxslt library
+XML::LibXSLT - Interface to the GNOME libxslt library
 
 =head1 SYNOPSIS
 
   use XML::LibXSLT;
   use XML::LibXML;
-  
+
   my $xslt = XML::LibXSLT->new();
-  
+
   my $source = XML::LibXML->load_xml(location => 'foo.xml');
   my $style_doc = XML::LibXML->load_xml(location=>'bar.xsl', no_cdata=>1);
-  
+
   my $stylesheet = $xslt->parse_stylesheet($style_doc);
-  
+
   my $results = $stylesheet->transform($source);
-  
+
   print $stylesheet->output_as_bytes($results);
 
 =head1 DESCRIPTION
 
-This module is an interface to the gnome project's libxslt. This is an
+This module is an interface to the GNOME project's libxslt. This is an
 extremely good XSLT engine, highly compliant and also very fast. I have
 tests showing this to be more than twice as fast as Sablotron.
 
@@ -659,6 +679,7 @@ debug messages will be ignored.
 =item register_function
 
   XML::LibXSLT->register_function($uri, $name, $subref);
+  $stylesheet->register_function($uri, $name, $subref);
 
 Registers an XSLT extension function mapped to the given URI. For example:
 
@@ -687,6 +708,30 @@ be a nodelist or a plain value - the code will just do the right thing.
 But only a single return value is supported (a list is not converted to
 a nodelist).
 
+=item register_element
+
+	$stylesheet->register_element($uri, $name, $subref)
+
+Registers an XSLT extension element $name mapped to the given URI. For example:
+
+  $stylesheet->register_element("urn:foo", "hello", sub {
+	  my $name = $_[2]->getAttribute( "name" );
+	  return XML::LibXML::Text->new( "Hello, $name!" );
+  });
+
+Will register a C<hello> element in the C<urn:foo> namespace that returns a "Hello, X!" text node. You must define this namespace in your XSLT and include its prefix in the C<extension-element-prefixes> list:
+
+  <xsl:stylesheet version="1.0"
+    xmlns:xsl="http://www.w3.org/1999/XSL/Transform"
+    xmlns:foo="urn:foo"
+	extension-element-prefixes="foo">
+  <xsl:template match="/">
+    <foo:hello name="bob"/>
+  </xsl:template>
+  </xsl:stylesheet>
+
+The callback is passed the input document node as $_[1] and the stylesheet node as $_[2]. $_[0] is reserved for future use.
+
 =back
 
 =head1 API
@@ -698,9 +743,9 @@ The following methods are available on the new XML::LibXSLT object:
 =item parse_stylesheet($stylesheet_doc)
 
 C<$stylesheet_doc> here is an XML::LibXML::Document object (see L<XML::LibXML>)
-representing an XSLT file. This method will return a 
+representing an XSLT file. This method will return a
 XML::LibXSLT::Stylesheet object, or undef on failure. If the XSLT is
-invalid, an exception will be thrown, so wrap the call to 
+invalid, an exception will be thrown, so wrap the call to
 parse_stylesheet in an eval{} block to trap this.
 
 IMPORTANT: C<$stylesheet_doc> should not contain CDATA sections,
@@ -741,16 +786,20 @@ happen with one stylesheet without requiring a reparse.
 
 =item transform(doc, %params)
 
-  my $results = $stylesheet->transform($doc, foo => "value);
+  my $results = $stylesheet->transform($doc, foo => "'bar'");
   print $stylesheet->output_as_bytes($results);
 
 Transforms the passed in XML::LibXML::Document object, and returns a
 new XML::LibXML::Document. Extra hash entries are used as parameters.
-See output_string
+Be sure to keep in mind the caveat with regard to quotes explained in
+the section on L</"Parameters"> below.
 
 =item transform_file(filename, %params)
 
-  my $results = $stylesheet->transform_file($filename, bar => "value");
+  my $results = $stylesheet->transform_file($filename, bar => "'baz'");
+
+Note the string parameter caveat, detailed in the section on
+L</"Parameters"> below.
 
 =item output_as_bytes(result)
 
@@ -790,11 +839,26 @@ Outputs the result to the file named in C<$filename>.
 
 Returns the output encoding of the results. Defaults to "UTF-8".
 
+=item output_method()
+
+Returns the value of the C<method> attribute from C<xsl:output>
+(usually C<xml>, C<html> or C<text>). If this attribute is
+unspecified, the default value is initially C<xml>. If the
+L<transform> method is used to produce an HTML document, as per the
+L<XSLT spec|http://www.w3.org/TR/xslt#output>, the default value will
+change to C<html>. To override this behavior completely, supply an
+C<xsl:output> element in the stylesheet source document.
+
 =item media_type()
 
-Returns the output media_type of the results. Defaults to "text/html".
+Returns the value of the C<media-type> attribute from
+C<xsl:output>. If this attribute is unspecified, the default media
+type is initially C<text/xml>. This default changes to C<text/html>
+under the same conditions as L<output_method>.
 
 =back
+
+=cut
 
 =head1 Parameters
 
@@ -953,7 +1017,7 @@ number of XML::LibXSLT module itself, i.e. with
 C<$XML::LibXSLT::VERSION>). XML::LibXSLT issues a warning if the
 runtime version of the library is less then the compile-time version.
 
-=over 
+=over
 
 =item XML::LibXSLT::LIBXSLT_VERSION()
 

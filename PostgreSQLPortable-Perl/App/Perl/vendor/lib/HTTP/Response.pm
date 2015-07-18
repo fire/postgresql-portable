@@ -2,7 +2,7 @@ package HTTP::Response;
 
 require HTTP::Message;
 @ISA = qw(HTTP::Message);
-$VERSION = "5.836";
+$VERSION = "6.04";
 
 use strict;
 use HTTP::Status ();
@@ -143,12 +143,8 @@ sub filename
 			}
 
 			require Encode;
-			require encoding;
-			# This is ugly use of non-public API, but is there
-			# a better way to accomplish what we want (locally
-			# as-is usable filename string)?
-			my $locale_charset = encoding::_get_locale_encoding();
-			Encode::from_to($encfile, $charset, $locale_charset);
+			require Encode::Locale;
+			Encode::from_to($encfile, $charset, "locale_fs");
 		    };
 
 		    $file = $encfile unless $@;
@@ -185,7 +181,6 @@ sub filename
 
 sub as_string
 {
-    require HTTP::Status;
     my $self = shift;
     my($eol) = @_;
     $eol = "\n" unless defined $eol;
@@ -221,10 +216,11 @@ sub is_error    { HTTP::Status::is_error    (shift->{'_rc'}); }
 
 sub error_as_HTML
 {
-    require HTML::Entities;
     my $self = shift;
     my $title = 'An Error Occurred';
-    my $body  = HTML::Entities::encode($self->status_line);
+    my $body  = $self->status_line;
+    $body =~ s/&/&amp;/g;
+    $body =~ s/</&lt;/g;
     return <<EOM;
 <html>
 <head><title>$title</title></head>
@@ -383,7 +379,7 @@ Constructs a new C<HTTP::Response> object describing a response with
 response code $code and optional message $msg.  The optional $header
 argument should be a reference to an C<HTTP::Headers> object or a
 plain array reference of key/value pairs.  The optional $content
-argument should be a string of bytes.  The meaning these arguments are
+argument should be a string of bytes.  The meanings of these arguments are
 described below.
 
 =item $r = HTTP::Response->parse( $str )
@@ -395,7 +391,7 @@ This constructs a new response object by parsing the given string.
 =item $r->code( $code )
 
 This is used to get/set the code attribute.  The code is a 3 digit
-number that encode the overall outcome of a HTTP response.  The
+number that encode the overall outcome of an HTTP response.  The
 C<HTTP::Status> module provide constants that provide mnemonic names
 for the code attribute.
 

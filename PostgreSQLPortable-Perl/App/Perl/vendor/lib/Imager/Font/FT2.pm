@@ -1,28 +1,22 @@
 package Imager::Font::FT2;
 use strict;
 use Imager;
+use Scalar::Util ();
 use vars qw($VERSION @ISA);
 @ISA = qw(Imager::Font);
 
 BEGIN {
-  $VERSION = "0.79";
+  $VERSION = "0.88";
 
-  eval {
-    require XSLoader;
-    XSLoader::load('Imager::Font::FT2', $VERSION);
-    1;
-  } or do {
-    require DynaLoader;
-    push @ISA, 'DynaLoader';
-    bootstrap Imager::Font::FT2 $VERSION;
-  };
+  require XSLoader;
+  XSLoader::load('Imager::Font::FT2', $VERSION);
 }
 
 *_first = \&Imager::Font::_first;
 
 sub new {
   my $class = shift;
-  my %hsh=(color=>Imager::Color->new(255,0,0,0),
+  my %hsh=(color=>Imager::Color->new(255,0,0,255),
 	   size=>15,
 	   @_);
 
@@ -57,6 +51,10 @@ sub new {
 
 sub _draw {
   my $self = shift;
+
+  $self->_valid
+    or return;
+
   my %input = @_;
   if (exists $input{channel}) {
     i_ft2_cp($self->{id}, $input{image}{IMG}, $input{'x'}, $input{'y'},
@@ -76,12 +74,19 @@ sub _bounding_box {
   my $self = shift;
   my %input = @_;
 
+  $self->_valid
+    or return;
+
   return i_ft2_bbox($self->{id}, $input{size}, $input{sizew}, $input{string}, 
 		    $input{utf8});
 }
 
 sub dpi {
   my $self = shift;
+
+  $self->_valid
+    or return;
+
   my @old = i_ft2_getdpi($self->{id});
   if (@_) {
     my %hsh = @_;
@@ -104,11 +109,17 @@ sub dpi {
 sub hinting {
   my ($self, %opts) = @_;
 
+  $self->_valid
+    or return;
+
   i_ft2_sethinting($self->{id}, $opts{hinting} || 0);
 }
 
 sub _transform {
   my $self = shift;
+
+  $self->_valid
+    or return;
 
   my %hsh = @_;
   my $matrix = $hsh{matrix} or return undef;
@@ -124,6 +135,9 @@ sub utf8 {
 sub has_chars {
   my ($self, %hsh) = @_;
 
+  $self->_valid
+    or return;
+
   unless (defined $hsh{string} && length $hsh{string}) {
     $Imager::ERRSTR = "No string supplied to \$font->has_chars()";
     return;
@@ -135,6 +149,9 @@ sub has_chars {
 sub face_name {
   my ($self) = @_;
 
+  $self->_valid
+    or return;
+
   i_ft2_face_name($self->{id});
 }
 
@@ -144,6 +161,9 @@ sub can_glyph_names {
 
 sub glyph_names {
   my ($self, %input) = @_;
+
+  $self->_valid
+    or return;
 
   my $string = $input{string};
   defined $string
@@ -161,11 +181,17 @@ sub glyph_names {
 sub is_mm {
   my ($self) = @_;
 
+  $self->_valid
+    or return;
+
   i_ft2_is_multiple_master($self->{id});
 }
 
 sub mm_axes {
   my ($self) = @_;
+
+  $self->_valid
+    or return;
 
   my ($num_axis, $num_design, @axes) =
     i_ft2_get_multiple_masters($self->{id})
@@ -177,6 +203,9 @@ sub mm_axes {
 sub set_mm_coords {
   my ($self, %opts) = @_;
 
+  $self->_valid
+    or return;
+
   $opts{coords}
     or return Imager->_set_error("Missing coords parameter");
   ref($opts{coords}) && $opts{coords} =~ /ARRAY\(0x[\da-f]+\)$/
@@ -187,6 +216,19 @@ sub set_mm_coords {
 
   return 1;
 }
+
+# objects may be invalidated on thread creation (or Win32 fork emulation)
+sub _valid {
+  my $self = shift;
+
+  unless ($self->{id} && Scalar::Util::blessed($self->{id})) {
+    Imager->_set_error("font object was created in another thread");
+    return;
+  }
+
+  return 1;
+}
+
 1;
 
 __END__
@@ -218,7 +260,7 @@ supported font files, so I've renamed it.
 
 =head1 AUTHOR
 
-Tony Cook <tony@imager.perl.org>
+Tony Cook <tonyc@cpan.org>
 
 =head1 SEE ALSO
 

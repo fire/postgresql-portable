@@ -1,4 +1,5 @@
 C:\strawberry\perl\vendor\lib\Net\SSLeay.pm
+C:\strawberry\perl\vendor\lib\Net\SSLeay.pod
 C:\strawberry\perl\vendor\lib\Net\SSLeay\Handle.pm
 C:\strawberry\perl\vendor\lib\auto\Net\SSLeay\SSLeay.bs
 C:\strawberry\perl\vendor\lib\auto\Net\SSLeay\SSLeay.dll
@@ -33,6 +34,7 @@ C:\strawberry\perl\vendor\lib\auto\Net\SSLeay\head_httpx4.al
 C:\strawberry\perl\vendor\lib\auto\Net\SSLeay\http_cat.al
 C:\strawberry\perl\vendor\lib\auto\Net\SSLeay\https_cat.al
 C:\strawberry\perl\vendor\lib\auto\Net\SSLeay\httpx_cat.al
+C:\strawberry\perl\vendor\lib\auto\Net\SSLeay\initialize.al
 C:\strawberry\perl\vendor\lib\auto\Net\SSLeay\make_form.al
 C:\strawberry\perl\vendor\lib\auto\Net\SSLeay\make_headers.al
 C:\strawberry\perl\vendor\lib\auto\Net\SSLeay\new_x_ctx.al

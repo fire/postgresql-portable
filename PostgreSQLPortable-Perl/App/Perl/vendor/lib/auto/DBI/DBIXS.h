@@ -1,6 +1,6 @@
 /* vim: ts=8:sw=4:expandtab
  *
- * $Id: DBIXS.h 14562 2010-12-06 10:26:17Z mjevans $
+ * $Id: DBIXS.h 15268 2012-04-18 11:34:59Z timbo $
  *
  * Copyright (c) 1994-2010  Tim Bunce  Ireland
  *
@@ -197,23 +197,45 @@ typedef struct {                /* -- FIELD DESCRIPTOR --               */
 #define DBIc_ACTIVE_KIDS(imp)   _imp2com(imp, std.active_kids)
 #define DBIc_LAST_METHOD(imp)   _imp2com(imp, std.last_method)
 
+/*  d = DBD flags,  l = DBD level (needs to be shifted down)
+ *  D - DBI flags,  r = reserved,  L = DBI trace level
+ *  Trace level bit allocation: 0xddlDDDrL   */
 #define DBIc_TRACE_LEVEL_MASK   0x0000000F
-#define DBIc_TRACE_FLAGS_MASK   0xFFFFFF00
+#define DBIc_TRACE_FLAGS_MASK   0xFF0FFF00  /* includes DBD flag bits for DBIc_TRACE */
 #define DBIc_TRACE_SETTINGS(imp) (DBIc_DBISTATE(imp)->debug)
 #define DBIc_TRACE_LEVEL(imp)   (DBIc_TRACE_SETTINGS(imp) & DBIc_TRACE_LEVEL_MASK)
 #define DBIc_TRACE_FLAGS(imp)   (DBIc_TRACE_SETTINGS(imp) & DBIc_TRACE_FLAGS_MASK)
+/* DBI defined trace flags */
+#define DBIf_TRACE_SQL          0x00000100
+#define DBIf_TRACE_CON          0x00000200
+#define DBIf_TRACE_ENC          0x00000400
+#define DBIf_TRACE_DBD          0x00000800
+#define DBIf_TRACE_TXN          0x00001000
+
+#define DBDc_TRACE_LEVEL_MASK   0x00F00000
+#define DBDc_TRACE_LEVEL_SHIFT  20
+#define DBDc_TRACE_LEVEL(imp)         ( (DBIc_TRACE_SETTINGS(imp) & DBDc_TRACE_LEVEL_MASK) >> DBDc_TRACE_LEVEL_SHIFT )
+#define DBDc_TRACE_LEVEL_set(imp, l)  ( DBIc_TRACE_SETTINGS(imp) |= (((l) << DBDc_TRACE_LEVEL_SHIFT) & DBDc_TRACE_LEVEL_MASK ))
+
 /* DBIc_TRACE_MATCHES(this, crnt): true if this 'matches' (is within) crnt
    DBIc_TRACE_MATCHES(foo, DBIc_TRACE_SETTINGS(imp))
 */
 #define DBIc_TRACE_MATCHES(this, crnt)  \
         (  ((crnt & DBIc_TRACE_LEVEL_MASK) >= (this & DBIc_TRACE_LEVEL_MASK)) \
         || ((crnt & DBIc_TRACE_FLAGS_MASK)  & (this & DBIc_TRACE_FLAGS_MASK)) )
-/* DBIc_TRACE: true if flags match & DBI level>=flaglevel, or if DBI level>level
+
+/* DBIc_TRACE(imp, flags, flag_level, fallback_level)
+   True if flags match the handle trace flags & handle trace level >= flag_level,
+   OR if handle trace_level > fallback_level (typically > flag_level).
    This is the main trace testing macro to be used by drivers.
-   (Drivers should define their own DBDtf_* macros for the top 8 bits: 0xFF000000)
-   DBIc_TRACE(imp,         0, 0, 4) = if level >= 4
-   DBIc_TRACE(imp, DBDtf_FOO, 2, 4) = if tracing DBDtf_FOO & level>=2 or level>=4
-   DBIc_TRACE(imp, DBDtf_FOO, 2, 0) = as above but never trace just due to level
+   (Drivers should define their own DBDf_TRACE_* macros for the top 8 bits: 0xFF000000)
+   DBIc_TRACE(imp,              0, 0, 4) = if trace level >= 4
+   DBIc_TRACE(imp, DBDf_TRACE_FOO, 2, 4) = if tracing DBDf_FOO & level>=2 or level>=4
+   DBIc_TRACE(imp, DBDf_TRACE_FOO, 2, 0) = as above but never trace just due to level
+   e.g.
+    if (DBIc_TRACE(imp_xxh, DBIf_TRACE_SQL|DBIf_TRACE_xxx, 2, 0)) {
+        PerlIO_printf(DBIc_LOGPIO(imp_sth), "\tThe %s wibbled the %s\n", ...);
+    }
 */
 #define DBIc_TRACE(imp, flags, flaglevel, level)        \
         (  (flags && (DBIc_TRACE_FLAGS(imp) & flags) && (DBIc_TRACE_LEVEL(imp) >= flaglevel)) \
@@ -452,8 +474,6 @@ struct dbistate_st {
 #define set_attr(h, k, v)       set_attr_k(h, k, 0, v)
 #define get_attr(h, k)          get_attr_k(h, k, 0)
 
-#define DBISTATE_PERLNAME "DBI::_dbistate"
-#define DBISTATE_ADDRSV   (get_sv(DBISTATE_PERLNAME, 0x05))
 #define DBILOGFP        (DBIS->logfp)
 #ifdef IN_DBI_XS
 #define DBILOGMSG       (dbih_logmsg)
@@ -461,28 +481,45 @@ struct dbistate_st {
 #define DBILOGMSG       (DBIS->logmsg)
 #endif
 
-
 /* --- perl object (ActiveState) / multiplicity hooks and hoops --- */
 /* note that USE_ITHREADS implies MULTIPLICITY                      */
-#define DBIS_PUBLISHED_LVALUE (*(INT2PTR(dbistate_t**, &SvIVX(DBISTATE_ADDRSV))))
+
+typedef dbistate_t** (*_dbi_state_lval_t)(pTHX);
+
+# define _DBISTATE_DECLARE_COMMON \
+    static _dbi_state_lval_t dbi_state_lval_p = 0;                          \
+    static dbistate_t** dbi_get_state(pTHX) {                               \
+        if (!dbi_state_lval_p) {                                            \
+            CV *cv = get_cv("DBI::_dbi_state_lval", 0);                     \
+            if (!cv)                                                        \
+                croak("Unable to get DBI state function. DBI not loaded."); \
+            dbi_state_lval_p = (_dbi_state_lval_t)CvXSUB(cv);               \
+        }                                                                   \
+        return dbi_state_lval_p(aTHX);                                      \
+    }                                                                       \
+    typedef int dummy_dbistate /* keep semicolon from feeling lonely */
+
 #if defined(MULTIPLICITY) || defined(PERL_OBJECT) || defined(PERL_CAPI)
 
-# define DBISTATE_DECLARE    typedef int dummy_dbistate /* keep semicolon from feeling lonely */
-# define DBISTATE_INIT_DBIS  typedef int dummy_dbistate2; /* keep semicolon from feeling lonely */
+# define DBISTATE_DECLARE _DBISTATE_DECLARE_COMMON
+# define _DBISTATE_INIT_DBIS
 # undef  DBIS
-# define DBIS DBIS_PUBLISHED_LVALUE
-# define dbis DBIS_PUBLISHED_LVALUE /* temp for old drivers using 'dbis' instead of 'DBIS' */
+# define DBIS (*dbi_get_state(aTHX))
+# define dbis DBIS /* temp for old drivers using 'dbis' instead of 'DBIS' */
 
 #else   /* plain and simple non perl object / multiplicity case */
 
-# define DBISTATE_DECLARE       static dbistate_t *DBIS
-# define DBISTATE_INIT_DBIS     (DBIS = DBIS_PUBLISHED_LVALUE)
+# define DBISTATE_DECLARE \
+    static dbistate_t *DBIS; \
+    _DBISTATE_DECLARE_COMMON
+
+# define _DBISTATE_INIT_DBIS      DBIS = *dbi_get_state(aTHX);
 #endif
 
 # define DBISTATE_INIT {        /* typically use in BOOT: of XS file    */    \
-    DBISTATE_INIT_DBIS; \
+    _DBISTATE_INIT_DBIS \
     if (DBIS == NULL)   \
-        croak("Unable to get DBI state from %s at %p. DBI not loaded.", DBISTATE_PERLNAME, (void*)DBISTATE_ADDRSV); \
+        croak("Unable to get DBI state. DBI not loaded."); \
     DBIS->check_version(__FILE__, DBISTATE_VERSION, sizeof(*DBIS), NEED_DBIXS_VERSION, \
                 sizeof(dbih_drc_t), sizeof(dbih_dbc_t), sizeof(dbih_stc_t), sizeof(dbih_fdc_t) \
     ); \
@@ -512,6 +549,10 @@ struct dbistate_st {
 #define DBD_ATTRIB_GET_IV(attribs, key,klen, svp, var)                  \
         if ((svp=DBD_ATTRIB_GET_SVP(attribs, key,klen)) != NULL)        \
             var = SvIV(*svp)
+
+#define DBD_ATTRIB_GET_UV(attribs, key,klen, svp, var)                  \
+        if ((svp=DBD_ATTRIB_GET_SVP(attribs, key,klen)) != NULL)        \
+            var = SvUV(*svp)
 
 #define DBD_ATTRIB_GET_BOOL(attribs, key,klen, svp, var)                \
         if ((svp=DBD_ATTRIB_GET_SVP(attribs, key,klen)) != NULL)        \

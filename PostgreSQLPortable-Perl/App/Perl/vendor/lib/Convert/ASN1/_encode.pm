@@ -3,6 +3,12 @@
 # modify it under the same terms as Perl itself.
 
 package Convert::ASN1;
+{
+  $Convert::ASN1::VERSION = '0.26';
+}
+
+use strict;
+use warnings;
 
 BEGIN {
   unless (CHECK_UTF8) {
@@ -26,6 +32,7 @@ my @encode = (
   \&_enc_object_id,
   \&_enc_real,
   \&_enc_sequence,
+  \&_enc_sequence, # EXPLICIT is the same encoding as sequence
   \&_enc_sequence, # SET is the same encoding as sequence
   \&_enc_time,
   \&_enc_time,
@@ -42,6 +49,7 @@ sub _encode {
   my $var;
 
   foreach my $op (@{$ops}) {
+    next if $op->[cTYPE] == opEXTENSIONS;
     if (defined(my $opt = $op->[cOPT])) {
       next unless defined $stash->{$opt};
     }
@@ -300,6 +308,7 @@ sub _enc_time {
     return;
   }
 
+  my $time;
   my @time;
   my $offset;
   my $isgen = $_[1]->[cTYPE] == opGTIME;
@@ -380,6 +389,7 @@ sub _enc_choice {
 
   my $stash = defined($_[3]) ? $_[3] : $_[2];
   for my $op (@{$_[1]->[cCHILD]}) {
+    next if $op->[cTYPE] == opEXTENSIONS;
     my $var = defined $op->[cVAR] ? $op->[cVAR] : $op->[cCHILD]->[0]->[cVAR];
 
     if (exists $stash->{$var}) {

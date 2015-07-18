@@ -1,24 +1,20 @@
 package YAML::Types;
+use YAML::Mo;
 
-use strict;
-use warnings;
-use YAML::Base;
+our $VERSION = '0.84';
+
 use YAML::Node;
-
-our $VERSION = '0.72';
-our @ISA     = 'YAML::Base';
 
 # XXX These classes and their APIs could still use some refactoring,
 # but at least they work for now.
 #-------------------------------------------------------------------------------
 package YAML::Type::blessed;
-
-use YAML::Base; # XXX
+use YAML::Mo; # XXX
 
 sub yaml_dump {
     my $self = shift;
     my ($value) = @_;
-    my ($class, $type) = YAML::Base->node_info($value);
+    my ($class, $type) = YAML::Mo::Object->node_info($value);
     no strict 'refs';
     my $kind = lc($type) . ':';
     my $tag = ${$class . '::ClassTag'} ||
@@ -62,10 +58,9 @@ sub yaml_dump {
                                atime mtime ctime blksize blocks);
                 undef $value;
                 $value->{stat} = YAML::Node->new({});
-                map {$value->{stat}{shift @stats} = $_} stat(*{$_[0]});
-                $value->{fileno} = fileno(*{$_[0]});
-                {
+                if ($value->{fileno} = fileno(*{$_[0]})) {
                     local $^W;
+                    map {$value->{stat}{shift @stats} = $_} stat(*{$_[0]});
                     $value->{tell} = tell(*{$_[0]});
                 }
             }
@@ -126,7 +121,7 @@ sub yaml_dump {
     my $self = shift;
     my $code;
     my ($dumpflag, $value) = @_;
-    my ($class, $type) = YAML::Base->node_info($value);
+    my ($class, $type) = YAML::Mo::Object->node_info($value);
     my $tag = "!perl/code";
     $tag .= ":$class" if defined $class;
     if (not $dumpflag) {
@@ -256,7 +251,7 @@ Ingy döt Net <ingy@cpan.org>
 
 =head1 COPYRIGHT
 
-Copyright (c) 2006. Ingy döt Net. All rights reserved.
+Copyright (c) 2006, 2011-2012. Ingy döt Net. All rights reserved.
 
 This program is free software; you can redistribute it and/or modify it
 under the same terms as Perl itself.

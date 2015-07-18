@@ -1,13 +1,14 @@
-package YAML::Node;
-
 use strict;
 use warnings;
+package YAML::Node;
 
-use YAML::Base;
+our $VERSION = '0.84';
+
 use YAML::Tag;
+require YAML::Mo;
 
-our $VERSION = '0.72';
-our @ISA     = 'YAML::Base';
+use Exporter;
+our @ISA     = qw(Exporter YAML::Mo::Object);
 our @EXPORT  = qw(ynode);
 
 sub ynode {
@@ -17,6 +18,9 @@ sub ynode {
     }
     elsif (ref($_[0]) eq 'ARRAY') {
 	$self = tied(@{$_[0]});
+    }
+    elsif (ref(\$_[0]) eq 'GLOB') {
+	$self = tied(*{$_[0]});
     }
     else {
 	$self = tied($_[0]);
@@ -28,7 +32,7 @@ sub new {
     my ($class, $node, $tag) = @_;
     my $self;
     $self->{NODE} = $node;
-    my (undef, $type) = $class->node_info($node);
+    my (undef, $type) = YAML::Mo::Object->node_info($node);
     $self->{KIND} = (not defined $type) ? 'scalar' :
                     ($type eq 'ARRAY') ? 'sequence' :
 		    ($type eq 'HASH') ? 'mapping' :
@@ -293,7 +297,7 @@ Ingy döt Net <ingy@cpan.org>
 
 =head1 COPYRIGHT
 
-Copyright (c) 2006. Ingy döt Net. All rights reserved.
+Copyright (c) 2006, 2011-2012. Ingy döt Net. All rights reserved.
 
 Copyright (c) 2002. Brian Ingerson. All rights reserved.
 

@@ -1,4 +1,4 @@
-#!/usr/bin/perl
+#!perl
 
 require 5;
 BEGIN { $^W = 1 if $ENV{'PERLDOCDEBUG'} }

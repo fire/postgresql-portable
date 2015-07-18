@@ -1,13 +1,15 @@
 #
 # Win32::API::Struct - Perl Win32 API struct Facility
-# 
+#
 # Author: Aldo Calpini <dada@perl.it>
 # Maintainer: Cosimo Streppone <cosimo@cpan.org>
 #
 
 package Win32::API::Struct;
-
-$VERSION = '0.62';
+use strict;
+use warnings;
+use vars qw( $VERSION @ISA );
+$VERSION = '0.64';
 
 use Carp;
 use Win32::API::Type;
@@ -19,47 +21,80 @@ require DynaLoader;
 
 my %Known = ();
 
-sub DEBUG { 
-    if ($Win32::API::DEBUG) { 
-        printf @_ if @_ or return 1; 
-    } else {
+sub DEBUG {
+    if ($Win32::API::DEBUG) {
+        printf @_ if @_ or return 1;
+    }
+    else {
         return 0;
     }
 }
 
 sub typedef {
-    my $class = shift;
+    my $class  = shift;
     my $struct = shift;
-    my($type, $name);
+    my ($type, $name, @recog_arr);
     my $self = {
-    	align 	=> undef,
+        align   => undef,
         typedef => [],
     };
-    while(defined($type = shift)) {
+    while (defined($type = shift)) {
         $name = shift;
         $name =~ s/;$//;
-        push( @{ $self->{typedef} }, [ recognize($type, $name) ] );
+        @recog_arr = recognize($type, $name);
+#http://perlmonks.org/?node_id=978468, not catching the type not found here,
+#will lead to a div 0 later
+        if(@recog_arr != 3){ 
+            carp "Win32::API::Struct::typedef: unknown member type=\"$type\", name=\"$name\"";
+            return undef;
+        }
+        push(@{$self->{typedef}}, [@recog_arr]);
     }
 
     $Known{$struct} = $self;
+    $Win32::API::Type::Known{$struct} = '>';
     return 1;
 }
 
 
-sub recognize {
-    my($type, $name) = @_;
-    my($size, $packing);
+#void ck_type($param, $proto, $param_num)
+sub ck_type {
+    my ($param, $proto) = @_;
+    #legacy LP prefix check
+    return if substr($proto, 0, 2) eq 'LP' && substr($proto, 2) eq $param;
+    #check if proto can be converted to base struct name
+    return if exists $Win32::API::Struct::Pointer{$proto} &&
+            $param eq $Win32::API::Struct::Pointer{$proto};
+    #check if proto can have * chopped off to convert to base struct name
+    $proto =~ s/\s*\*$//;
+    return if $proto eq $param;
+    croak("Win32::API::Call: supplied type (LP)\"".
+          $param."\"( *) doesn't match type \"".
+          $_[1]."\" for parameter ".
+          $_[2]." ");
+}
 
-    if (is_known($type)) {
+#$basename = to_base_struct($pointername)
+sub to_base_struct {
+    return $Win32::API::Struct::Pointer{$_[0]}
+        if exists $Win32::API::Struct::Pointer{$_[0]};
+    die "Win32::API::Struct::Unpack unknown type";
+}
+
+sub recognize {
+    my ($type, $name) = @_;
+    my ($size, $packing);
+
+    if (exists $Known{$type}) {
         $packing = '>';
         return ($name, $packing, $type);
     }
-	else {
+    else {
         $packing = Win32::API::Type::packing($type);
-        return undef unless defined $packing;           
-        if($name =~ s/\[(.*)\]$//) {
-            $size = $1;     
-            $packing = $packing . '*' . $size;  
+        return undef unless defined $packing;
+        if ($name =~ s/\[(.*)\]$//) {
+            $size    = $1;
+            $packing = $packing . '*' . $size;
         }
         DEBUG "(PM)Struct::recognize got '$name', '$type' -> '$packing'\n";
         return ($name, $packing, $type);
@@ -68,35 +103,41 @@ sub recognize {
 
 sub new {
     my $class = shift;
-    my($type, $name);
-    my $self = {
-        typedef => [],
-    };
-    if($#_ == 0) {
+    my ($type, $name, $packing);
+    my $self = {typedef => [],};
+    if ($#_ == 0) {
         if (is_known($_[0])) {
             DEBUG "(PM)Struct::new: got '$_[0]'\n";
-            $self->{typedef} = $Known{$_[0]}->{typedef};
-            foreach my $member (@{ $self->{typedef} }) {
+            if( ! defined ($self->{typedef} = $Known{$_[0]}->{typedef})){
+                carp 'Win32::API::Struct::new: unknown type="'.$_[0].'"';
+                return undef;
+            }
+            foreach my $member (@{$self->{typedef}}) {
                 ($name, $packing, $type) = @$member;
                 next unless defined $name;
-                if($packing eq '>') {
+                if ($packing eq '>') {
                     $self->{$name} = Win32::API::Struct->new($type);
                 }
             }
             $self->{__typedef__} = $_[0];
-        } else {
+        }
+        else {
             carp "Unknown Win32::API::Struct '$_[0]'";
             return undef;
         }
-    } else {
-        while(defined($type = shift)) {
+    }
+    else {
+        while (defined($type = shift)) {
             $name = shift;
+
             # print "new: found member $name ($type)\n";
-            if(not exists $Win32::API::Type::Known{$type}) {
-                warn "Unknown Win32::API::Struct type '$type'";
+            if (not exists $Win32::API::Type::Known{$type}) {
+                carp "Unknown Win32::API::Struct type '$type'";
                 return undef;
-            } else {
-                push( @{ $self->{typedef} }, [ $name, $Win32::API::Type::Known{$type}, $type ] );
+            }
+            else {
+                push(@{$self->{typedef}},
+                    [$name, $Win32::API::Type::Known{$type}, $type]);
             }
         }
     }
@@ -105,31 +146,34 @@ sub new {
 
 sub members {
     my $self = shift;
-    return map {$_->[0]} @{ $self->{typedef} };
+    return map { $_->[0] } @{$self->{typedef}};
 }
 
 sub sizeof {
-    my $self = shift;
-    my $size = 0;
+    my $self  = shift;
+    my $size  = 0;
     my $align = 0;
     my $first = '';
 
-    for my $member (@{ $self->{typedef} }) {
-        my($name, $packing, $type) = @{$member};
+    for my $member (@{$self->{typedef}}) {
+        my ($name, $packing, $type) = @{$member};
         next unless defined $name;
         if (ref $self->{$name} eq q{Win32::API::Struct}) {
+
             # If member is a struct, recursively calculate its size
             # FIXME for subclasses
             $size += $self->{$name}->sizeof();
-        }        
-        else {            
+        }
+        else {
+
             # Member is a simple type (LONG, DWORD, etc...)
-            if($packing =~ /\w\*(\d+)/) { # Arrays (ex: 'c*260')
+            if ($packing =~ /\w\*(\d+)/) {    # Arrays (ex: 'c*260')
                 $size += Win32::API::Type::sizeof($type) * $1;
                 $first = Win32::API::Type::sizeof($type) * $1 unless defined $first;
-                DEBUG "(PM)Struct::sizeof: sizeof with member($name) now = ". $size. "\n";
+                DEBUG "(PM)Struct::sizeof: sizeof with member($name) now = " . $size
+                    . "\n";
             }
-             else { # Simple types
+            else {                            # Simple types
                 my $type_size = Win32::API::Type::sizeof($type);
                 $align = $type_size if $type_size > $align;
                 my $type_align = (($size + $type_size) % $type_size);
@@ -139,7 +183,7 @@ sub sizeof {
         }
     }
 
-    my $struct_size = $size;    
+    my $struct_size = $size;
     if (defined $align && $align > 0) {
         $struct_size += ($size % $align);
     }
@@ -148,158 +192,249 @@ sub sizeof {
 }
 
 sub align {
-    my $self = shift;
-	my $align = shift;
-	
-	if (not defined $align) {
+    my $self  = shift;
+    my $align = shift;
 
-		if (! (defined $self->{align} && $self->{align} eq 'auto')) {
-			return $self->{align};
-		}
+    if (not defined $align) {
 
-		$align = 0;
+        if (!(defined $self->{align} && $self->{align} eq 'auto')) {
+            return $self->{align};
+        }
 
-		foreach my $member (@{ $self->{typedef} }) {
-			my($name, $packing, $type) = @$member;
+        $align = 0;
 
-			if(ref( $self->{$name} ) eq "Win32::API::Struct") {
-				 #### ????
-			} else {        
-				if($packing =~ /\w\*(\d+)/) {           
-					#### ????
-				} else {            
-					$align = Win32::API::Type::sizeof($type)
-						if Win32::API::Type::sizeof($type) > $align;                
-				}
-			}
-		}
-		return $align;	
-	} else {
-		$self->{align} = $align;	
-	
-	}
+        foreach my $member (@{$self->{typedef}}) {
+            my ($name, $packing, $type) = @$member;
+
+            if (ref($self->{$name}) eq "Win32::API::Struct") {
+                #### ????
+            }
+            else {
+                if ($packing =~ /\w\*(\d+)/) {
+                    #### ????
+                }
+                else {
+                    $align = Win32::API::Type::sizeof($type)
+                        if Win32::API::Type::sizeof($type) > $align;
+                }
+            }
+        }
+        return $align;
+    }
+    else {
+        $self->{align} = $align;
+
+    }
 }
 
 sub getPack {
-    my $self = shift;
-    my $packing = "";
+    my $self        = shift;
+    my $packing     = "";
     my $packed_size = 0;
-    my($type, $name, $type_size, $type_align);
-    my @items = ();
-    my @recipients = ();    
-    
+    my ($type, $name, $type_size, $type_align);
+    my @items      = ();
+    my @recipients = ();
+    my @buffer_ptrs = (); #this contains the struct_ptrs that were placed in the
+    #the struct, its part of "C func changes the struct ptr to a private allocated
+    #struct" code, it is push/poped only for struct ptrs, it is NOT a 1 to
+    #1 mapping between all struct members, so dont access it with indexes
+
     my $align = $self->align();
-    
-    foreach my $member (@{ $self->{typedef} }) {
-        ($name, $type, $orig) = @$member;
-        if($type eq '>') {
-            my($subpacking, $subitems, $subrecipients, $subpacksize) = $self->{$name}->getPack();           
-            DEBUG "(PM)Struct::getPack($self->{__typedef__}) ++ $subpacking\n";            
-            push(@items, @$subitems);
-            push(@recipients, @$subrecipients);	    
+
+    foreach my $member (@{$self->{typedef}}) {
+        my ($name, $type, $orig) = @$member;
+        if ($type eq '>') {
+            my ($subpacking, $subitems, $subrecipients, $subpacksize, $subbuffersptrs) =
+                $self->{$name}->getPack();
+            DEBUG "(PM)Struct::getPack($self->{__typedef__}) ++ $subpacking\n";
+            push(@items,      @$subitems);
+            push(@recipients, @$subrecipients);
+            push(@buffer_ptrs, @$subbuffersptrs);
             $packing .= $subpacking;
             $packed_size += $subpacksize;
-        } else {
-            if($type =~ /\w\*(\d+)/) {
-                my $size = $1;
-                $type = "a$size";
+        }
+        else {
+            my $repeat = 1;
+            if ($type =~ /\w\*(\d+)/) {
+                $repeat = $1;
+                $type = "a$repeat";
             }
-            
-            DEBUG "(PM)Struct::getPack($self->{__typedef__}) ++ $type\n"; 
-            
-            if($type eq 'p') {
-                $type = ($Config{ptrsize} == 8) ? 'Q' : 'L';
+
+            DEBUG "(PM)Struct::getPack($self->{__typedef__}) ++ $type\n";
+
+            if ($type eq 'p') {
+                $type = Win32::API::Type::pointer_pack_type();
                 push(@items, Win32::API::PointerTo($self->{$name}));
-            } else {
+            }
+            elsif ($type eq 'T') {
+                $type = Win32::API::Type::pointer_pack_type();
+                my $structptr;
+                if(ref($self->{$name})){
+                    $self->{$name}->Pack();
+                    $structptr = Win32::API::PointerTo($self->{$name}->{buffer});
+                }
+                else{
+                    $structptr = 0;
+                }
+                push(@items, $structptr);
+                push(@buffer_ptrs, $structptr);
+            }
+            else {
                 push(@items, $self->{$name});
             }
             push(@recipients, $self);
-            $type_size = Win32::API::Type::sizeof($orig);
+            $type_size  = Win32::API::Type::sizeof($orig);
             $type_align = (($packed_size + $type_size) % $type_size);
             $packing .= "x" x $type_align . $type;
-            $packed_size += $type_size + $type_align;
+            $packed_size += ( $type_size * $repeat ) + $type_align;
         }
     }
 
-    DEBUG "(PM)Struct::getPack: $self->{__typedef__}(buffer) = pack($packing, $packed_size)\n";
+    DEBUG
+        "(PM)Struct::getPack: $self->{__typedef__}(buffer) = pack($packing, $packed_size)\n";
 
-    return($packing, [@items], [@recipients], $packed_size);
+    return ($packing, [@items], [@recipients], $packed_size, \@buffer_ptrs);
 }
 
+# void $struct->Pack([$priv_warnings_flag]);
 sub Pack {
     my $self = shift;
-    my($packing, $items, $recipients) = $self->getPack();
+    my ($packing, $items);
+    ($packing,  $items,     $self->{buffer_recipients},
+     undef,     $self->{buffer_ptrs}) = $self->getPack();
 
+    if(DEBUG){
     DEBUG "(PM)Struct::Pack: $self->{__typedef__}(buffer) = pack($packing, @$items)\n";
-
-    $self->{buffer} = pack($packing, @$items);
-
+    }
+    
+    if($_[0]){ #Pack() on a new struct, without slice set, will cause lots of uninit
+        #warnings, sometimes its intentional to set up buffer recipients for a
+        #future UnPack()
+        no warnings 'uninitialized';
+        $self->{buffer} = pack($packing, @$items);
+    }
+    else{
+        $self->{buffer} = pack($packing, @$items);
+    }
     if (DEBUG) {
-        for my $i (0..$self->sizeof-1) {
+        for my $i (0 .. $self->sizeof - 1) {
             printf "#pack#    %3d: 0x%02x\n", $i, ord(substr($self->{buffer}, $i, 1));
         }
     }
-
-    $self->{buffer_recipients} = $recipients
 }
 
 sub getUnpack {
-    my $self = shift;
-    my $packing = "";
+    my $self        = shift;
+    my $packing     = "";
     my $packed_size = 0;
-    my($type, $name, $type_size, $type_align);
-    my @items = ();
+    my ($type, $name, $type_size, $type_align, $orig_type);
+    my (@items, @types, @type_names);
     my $align = $self->align();
-    foreach my $member (@{ $self->{typedef} }) {
-        ($name, $type, $orig) = @$member;
-        if($type eq '>') {
-            my($subpacking, @subitems, $subpacksize) = $self->{$name}->getUnpack();            
+    foreach my $member (@{$self->{typedef}}) {
+        my ($name, $type, $orig) = @$member;
+        if ($type eq '>') {
+            my ($subpacking, $subpacksize, $subitems, $subtypes, $subtype_names) = $self->{$name}->getUnpack();
             DEBUG "(PM)Struct::getUnpack($self->{__typedef__}) ++ $subpacking\n";
             $packing .= $subpacking;
-            $packed_size += $subpacksize;	    
-            push(@items, @subitems);
-        } else {
-            if($type =~ /\w\*(\d+)/) {
-                my $size = $1;
-                $type = "Z$size";
-            }          
-	    DEBUG "(PM)Struct::getUnpack($self->{__typedef__}) ++ $type\n";
-	    $type_size = Win32::API::Type::sizeof($orig);
-	    $type_align = (($packed_size + $type_size) % $type_size);
-	    $packing .= "x" x $type_align . $type;
-	    $packed_size += $type_size + $type_align;
-
+            $packed_size += $subpacksize;
+            push(@items, @$subitems);
+            push(@types, @$subtypes);
+            push(@type_names, @$subtype_names);
+        }
+        else {
+            if($type eq 'T') {
+                $orig_type = $type;
+                $type = Win32::API::Type::pointer_pack_type();
+            }
+            my $repeat = 1;
+            if ($type =~ /\w\*(\d+)/) {
+                $repeat = $1;
+                $type = "Z$repeat";
+            }
+            DEBUG "(PM)Struct::getUnpack($self->{__typedef__}) ++ $type\n";
+            $type_size  = Win32::API::Type::sizeof($orig);
+            $type_align = (($packed_size + $type_size) % $type_size);
+            $packing .= "x" x $type_align . $type;
+            $packed_size += ( $type_size * $repeat ) + $type_align;
             push(@items, $name);
+            if($orig_type){
+                push(@types, $orig_type);
+                undef($orig_type);
+            }
+            else{
+                push(@types, $type);
+            }
+            push(@type_names, $orig);
         }
     }
     DEBUG "(PM)Struct::getUnpack($self->{__typedef__}): unpack($packing, @items)\n";
-    return($packing, @items, $packed_size);
+    return ($packing, $packed_size, \@items, \@types, \@type_names);
 }
 
 sub Unpack {
     my $self = shift;
-    my($packing, @items) = $self->getUnpack();
+    my ($packing, undef, $items, $types, $type_names) = $self->getUnpack();
     my @itemvalue = unpack($packing, $self->{buffer});
     DEBUG "(PM)Struct::Unpack: unpack($packing, buffer) = @itemvalue\n";
-    foreach my $i (0..$#items) {
+    foreach my $i (0 .. $#$items) {
         my $recipient = $self->{buffer_recipients}->[$i];
+        my $item = $$items[$i];
         DEBUG "(PM)Struct::Unpack: %s(%s) = '%s' (0x%08x)\n",
-                $recipient->{__typedef__},
-                $items[$i],
-                $itemvalue[$i],
-                $itemvalue[$i],
-        ;       
-        $recipient->{$items[$i]} = $itemvalue[$i];
-        # DEBUG "(PM)Struct::Unpack: self.items[$i] = $self->{$items[$i]}\n";        
+            $recipient->{__typedef__},
+            $item,
+            $itemvalue[$i],
+            $itemvalue[$i],
+            ;
+        if($$types[$i] eq 'T'){
+my $oldstructptr = pop(@{$self->{buffer_ptrs}});
+my $newstructptr = $itemvalue[$i];
+my $SVMemberRef = \$recipient->{$item};
+
+if(!$newstructptr){ #new ptr is null
+    if($oldstructptr != $newstructptr){ #old ptr was true
+        carp "Win32::API::Struct::Unpack struct pointer".
+        " member \"".$item."\" was changed by C function,".
+        " possible resource leak";
+    }
+    $$SVMemberRef = undef;
+}
+else{ #new ptr is true
+    if($oldstructptr != $newstructptr){#old ptr was true, or null, but has changed, leak warning
+        carp "Win32::API::Struct::Unpack struct pointer".
+        " member \"".$item."\" was changed by C function,".
+        " possible resource leak";
+    }#create a ::Struct if the slice is undef, user had the slice set to undef
+    
+    if (!ref($$SVMemberRef)){
+        $$SVMemberRef = Win32::API::Struct->new(to_base_struct($type_names->[$i]));
+        $$SVMemberRef->Pack(1); #buffer_recipients must be generated, no uninit warnings
+    }
+#must fix {buffer} with contents of the new struct, $structptr might be
+#null or might be a SVPV from a ::Struct that was ignored, in any case,
+#a forign memory allocator is at work here
+    $$SVMemberRef->{buffer} = Win32::API::ReadMemory($newstructptr, $$SVMemberRef->sizeof)
+        if($oldstructptr != $newstructptr);
+#always must be called, if new ptr is not null, at this point, C func, did
+#one of 2 things, filled the old ::Struct's {buffer} PV, or gave a new struct *
+#from its own allocator, there is no way to tell if the struct contents changed
+#so Unpack() must be called
+    $$SVMemberRef->Unpack();
+}
+}
+    else{ #not a struct ptr
+        $recipient->{$item} = $itemvalue[$i];
+
+        # DEBUG "(PM)Struct::Unpack: self.items[$i] = $self->{$$items[$i]}\n";
+    }
     }
 }
 
 sub FromMemory {
-    my($self, $addr) = @_;
+    my ($self, $addr) = @_;
     DEBUG "(PM)Struct::FromMemory: doing Pack\n";
     $self->Pack();
     DEBUG "(PM)Struct::FromMemory: doing GetMemory( 0x%08x, %d )\n", $addr, $self->sizeof;
-    $self->{buffer} = Win32::API::ReadMemory( $addr, $self->sizeof );
+    $self->{buffer} = Win32::API::ReadMemory($addr, $self->sizeof);
     $self->Unpack();
     DEBUG "(PM)Struct::FromMemory: doing Unpack\n";
     DEBUG "(PM)Struct::FromMemory: structure is now:\n";
@@ -308,26 +443,35 @@ sub FromMemory {
 }
 
 sub Dump {
-    my $self = shift;
+    my $self   = shift;
     my $prefix = shift;
-    foreach my $member (@{ $self->{typedef} }) {
-        ($name, $packing, $type) = @$member;
-        if( ref($self->{$name}) ) {
+    foreach my $member (@{$self->{typedef}}) {
+        my ($name, $packing, $type) = @$member;
+        if (ref($self->{$name})) {
             $self->{$name}->Dump($name);
-        } else {        
+        }
+        else {
             printf "%-20s %-20s %-20s\n", $prefix, $name, $self->{$name};
         }
     }
-}   
+}
 
-
+#the LP logic should be moved to parse_prototype, since only
+#::API::Call() ever understood the implied LP prefix, Struct::new never did
+#is_known then can be inlined away and sub deleted, it is not public API
 sub is_known {
     my $name = shift;
-    if(exists $Known{ $name }) {
-    	return 1;
-    } else {
-    	if($name =~ s/^LP//) {
-        	return exists $Known{ $name };
+    if (exists $Known{$name}) {
+        return 1;
+    }
+    else {
+        my $nametest = $name;
+        if ($nametest =~ s/^LP//) {
+            return exists $Known{$nametest};
+        }
+        $nametest = $name;
+        if($nametest =~ s/\*$//){
+            return exists $Known{$nametest};
         }
         return 0;
     }
@@ -343,42 +487,44 @@ sub EXISTS {
 
 sub FETCH {
     my $self = shift;
-    my $key = shift;
-    
-    if($key eq 'sizeof') {
+    my $key  = shift;
+
+    if ($key eq 'sizeof') {
         return $self->sizeof;
     }
-    my @members = map { $_->[0] } @{ $self->{typedef} };
-    if(grep(/^\Q$key\E$/, @members)) {
+    my @members = map { $_->[0] } @{$self->{typedef}};
+    if (grep(/^\Q$key\E$/, @members)) {
         return $self->{$key};
-    } else {
+    }
+    else {
         warn "'$key' is not a member of Win32::API::Struct $self->{__typedef__}";
-    }   
+    }
 }
 
 sub STORE {
     my $self = shift;
-    my($key, $val) = @_;
-    my @members = map { $_->[0] } @{ $self->{typedef} };
-    if(grep(/^\Q$key\E$/, @members)) {
+    my ($key, $val) = @_;
+    my @members = map { $_->[0] } @{$self->{typedef}};
+    if (grep(/^\Q$key\E$/, @members)) {
         $self->{$key} = $val;
-    } else {
+    }
+    else {
         warn "'$key' is not a member of Win32::API::Struct $self->{__typedef__}";
     }
 }
 
 sub FIRSTKEY {
     my $self = shift;
-    my @members = map { $_->[0] } @{ $self->{typedef} };
-    return $members[0]; 
+    my @members = map { $_->[0] } @{$self->{typedef}};
+    return $members[0];
 }
 
 sub NEXTKEY {
-    my $self = shift;
-    my $key = shift;
-    my @members = map { $_->[0] } @{ $self->{typedef} };
-    for my $i (0..$#members-1) {    
-        return $members[$i+1] if $members[$i] eq $key;
+    my $self    = shift;
+    my $key     = shift;
+    my @members = map { $_->[0] } @{$self->{typedef}};
+    for my $i (0 .. $#members - 1) {
+        return $members[$i + 1] if $members[$i] eq $key;
     }
     return undef;
 }
@@ -418,7 +564,7 @@ Win32::API::Struct - C struct support package for Win32::API
 This module enables you to define C structs for use with
 Win32::API. 
 
-See L<Win32::API> for more info about its usage.
+See L<Win32::API/USING STRUCTURES> for more info about its usage.
 
 =head1 DESCRIPTION
 
@@ -435,7 +581,11 @@ of types and member names, just like in C. In fact, most of the
 times you can cut the C definition for a structure and paste it
 verbatim to your script, enclosing it in a C<qw()> block. The 
 function takes care of removing the semicolon after the member
-name.
+name. Win32::API::Struct does B<NOT> support Enums, Unions, or Bitfields.
+C<NAME> must not end in C<*>, typedef creates structs, not struct pointers.
+See L<Win32::API::Type/"typedef">
+on howto create a struct pointer type. Returns true on success, and undef on error.
+On error it L<warns|perlfunc/warn> with the specific reason.
 
 The synopsis example could be written like this:
 
@@ -449,11 +599,14 @@ syntax), which is pretty cool:
     LONG y; 
   };
 
-Also note that C<typedef> automatically defines an 'LPNAME' type,
-which holds a pointer to your structure. In the example above,
-'LPPOINT' is also defined and can be used in a call to a 
-Win32::API (in fact, this is what you're really going to use when
-doing API calls).
+L<Win32::API/Call> automatically knows that an 'LPNAME' type, refers
+to a 'NAME' type struct. Also see L<Win32::API::Type/"typedef"> on howto declare
+pointers to struct types.
+
+Unlike in Win32::API, a single non-array char or CHAR struct member in a
+struct is numeric, NOT the first character of a string. UTF16 strings pointers
+will be garbage on read back (passing in works, returning doesn't) since
+the NULL character will often be the 2nd byte of the UTF16 string.
 
 =item C<new NAME>
 
@@ -517,6 +670,38 @@ remember to backslash it, eg.
   GetCursorPos( \%Point )    vs.    GetCursorPos( $Point )
 
 =back
+
+=head2 FOREIGN MEMORY ALLOCATORS
+
+Using Win32::API::Struct is not recommended in situations where a C function
+will return results to you by putting a pointer to a string or a pointer to
+another struct into your supplied struct. Win32::API::Struct will do its best
+to detect that a new pointer appeared and to read it contents into Perl, but
+that pointer will be tossed away after being read. If this pointer is
+something you must explicitly free, you have leaked it by using
+Win32::API::Struct to decode it. If this pointer is something you must pass back to
+the C API you are using, you lost/leaked it. If you pass NULL, or a ::Struct
+pointer in a ::Struct to C API, after the C API call, ::Struct will detect the
+pointer changed, it will read the new struct from the new pointer into
+Perl, and a new child ::Struct will appear in the hash slice
+of the parent ::Struct, if you pass this new child ::Struct into the C API
+it will be a B<COPY> of the struct the C API from Perl's allocation placed
+in the parent ::Struct. For C++-like APIs, this will be unacceptable and lead to
+crashes as the C Functions tries to free a memory block that didn't come from the
+allocator of the C Function. Windows has many memory allocators, each CRT
+(VS 2, 3, 4, 5, NT/6, 7.0, 7.1, 8, 9, 10) malloc, LocalAlloc, GlobalAlloc,
+HeapAlloc, (each version of C++ Runtime Library) "new", CoGetMalloc, CoTaskMemAlloc,
+NetApiBufferAllocate, VirtualAlloc, CryptMemAlloc, AllocADsMem, SHAlloc,
+SnmpUtilMemAlloc. None of these allocators' pointers are compatible with Perl's
+allocator. Some C APIs give you static global buffers which never are freed or freed
+automatically in the next call to a function from to that DLL.
+
+With foreign allocators, its best to treat to write a pointer class, bless the
+ref to scalar interger (holding the pointer) into that class to ensure that the
+DESTROY method will free the pointer and you never leak it, and your write
+method accesors using L<perlfunc/pack>, L<Win32::API/ReadMemory> and
+L<Win32::API/WriteMemory> around the pointer.
+
 
 =head1 AUTHOR
 

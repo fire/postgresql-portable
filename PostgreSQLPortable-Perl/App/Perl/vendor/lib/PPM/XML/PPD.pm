@@ -13,8 +13,6 @@ use Exporter;
 # other XML documents without too much effort.
 ###############################################################################
 package PPM::XML::PPD;
-use vars qw( $VERSION );
-$VERSION = '0.01_01';
 @ISA = qw( Exporter );
 %EXPORT_TAGS = ( 'elements' =>
                  [ '%SOFTPKG::', '%IMPLEMENTATION::', '%DEPENDENCY::',

@@ -12,7 +12,7 @@ use File::Which ();
 # Globals
 use vars qw{$VERSION @ISA @EXPORT @EXPORT_OK $IMPLEMENTED_BY};
 BEGIN {
-	$VERSION = '0.97';
+	$VERSION = '1.00';
 
 	# Inherit manually
 	require Exporter;
@@ -159,17 +159,17 @@ sub my_dist_data {
 sub my_dist_config {
 	my $params = ref $_[-1] eq 'HASH' ? pop : {};
 	my $dist   = pop or Carp::croak("The my_dist_config method requires an argument");
-	
+
 	# not all platforms support a specific my_config() method
 	my $config = $IMPLEMENTED_BY->can('my_config')
 		? $IMPLEMENTED_BY->my_config
 		: $IMPLEMENTED_BY->my_documents;
 
-    # If neither configdir nor my_documents is defined, there's
-    # nothing we can do: bail out and return nothing...	
+	# If neither configdir nor my_documents is defined, there's
+	# nothing we can do: bail out and return nothing...	
 	return undef unless defined $config;
 
-    # On traditional unixes, hide the top-level dir
+	# On traditional unixes, hide the top-level dir
 	my $etc = $config eq home()
 		? File::Spec->catdir( $config, '.perl', $dist )
 		: File::Spec->catdir( $config, 'Perl',  $dist );
@@ -302,6 +302,7 @@ CLASS: {
 		}
 
 		# Get a named user's homedir
+		Carp::carp("The tied %~ hash has been deprecated");
 		return File::HomeDir::home($_[1]);
 	}
 
@@ -353,12 +354,6 @@ File::HomeDir - Find your home and other directories on any platform
   $pics    = File::HomeDir->users_pictures('foo');
   $video   = File::HomeDir->users_videos('foo');
   $data    = File::HomeDir->users_data('foo');
-  
-  # Legacy Interfaces
-  print "My dir is ", home(), " and root's is ", home('root'), "\n";
-  print "My dir is $~{''} and root's is $~{root}\n";
-  # These both print the same thing, something like:
-  # "My dir is /home/user/mojo and root's is /"
 
 =head1 DESCRIPTION
 
@@ -383,7 +378,7 @@ It is generally not recommended that you use this interface, but due to
 back-compatibility reasons they will remain supported until at least 2010.
 
 The C<%~> interface has been deprecated. Documentation was removed in 2009,
-Unit test were removed in 2011, usage will issue warnings from 2013, and the
+Unit test were removed in 2011, usage will issue warnings from 2012, and the
 interface will be removed entirely in 2015  (in line with the general Perl
 toolchain convention of a 10 year support period for legacy APIs that
 are potentially or actually in common use).
@@ -648,9 +643,6 @@ home/profile directory.
 
 =over 4
 
-=item * Become generally clearer on situations in which a user might not
-have a particular resource.
-
 =item * Add more granularity to Unix, and add support to VMS and other
 esoteric platforms, so we can consider going core.
 
@@ -688,7 +680,7 @@ address above.
 
 =head1 ACKNOWLEDGEMENTS
 
-The biggest acknowledgement must go to Chris Nandor, who wielded his
+The biggest acknowledgement goes to Chris Nandor, who wielded his
 legendary Mac-fu and turned my initial fairly ordinary Darwin
 implementation into something that actually worked properly everywhere,
 and then donated a Mac OS X license to allow it to be maintained properly.
@@ -709,7 +701,7 @@ L<File::ShareDir>, L<File::HomeDir::Win32> (legacy)
 
 =head1 COPYRIGHT
 
-Copyright 2005 - 2011 Adam Kennedy.
+Copyright 2005 - 2012 Adam Kennedy.
 
 Some parts copyright 2000 Sean M. Burke.
 
