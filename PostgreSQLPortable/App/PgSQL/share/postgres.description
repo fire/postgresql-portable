@@ -106,20 +106,28 @@
 328	pg_proc	0	btree(internal)
 332	pg_proc	0	btree(internal)
 972	pg_proc	0	btree(internal)
+276	pg_proc	0	btree(internal)
 1268	pg_proc	0	btree(internal)
 2785	pg_proc	0	btree(internal)
 347	pg_proc	0	I/O
 348	pg_proc	0	I/O
 350	pg_proc	0	less-equal-greater
+3129	pg_proc	0	sort support
 351	pg_proc	0	less-equal-greater
+3130	pg_proc	0	sort support
 842	pg_proc	0	less-equal-greater
+3131	pg_proc	0	sort support
 354	pg_proc	0	less-equal-greater
+3132	pg_proc	0	sort support
 355	pg_proc	0	less-equal-greater
+3133	pg_proc	0	sort support
 356	pg_proc	0	less-equal-greater
+3134	pg_proc	0	sort support
 404	pg_proc	0	less-equal-greater
 357	pg_proc	0	less-equal-greater
 358	pg_proc	0	less-equal-greater
 359	pg_proc	0	less-equal-greater
+3135	pg_proc	0	sort support
 360	pg_proc	0	less-equal-greater
 377	pg_proc	0	less-equal-greater
 380	pg_proc	0	less-equal-greater
@@ -174,6 +182,7 @@
 714	pg_proc	0	convert int8 to int2
 754	pg_proc	0	convert int2 to int8
 668	pg_proc	0	adjust char() to typmod length
+3097	pg_proc	0	transform a varchar length coercion
 669	pg_proc	0	adjust varchar() to typmod length
 710	pg_proc	0	deprecated, use current_user instead
 720	pg_proc	0	octet length
@@ -208,6 +217,9 @@
 2333	pg_proc	0	aggregate transition function
 2334	pg_proc	0	aggregate final function
 2335	pg_proc	0	concatenate aggregate input into an array
+3816	pg_proc	0	array typanalyze
+3817	pg_proc	0	restriction selectivity for array-containment operators
+3818	pg_proc	0	join selectivity for array-containment operators
 760	pg_proc	0	I/O
 761	pg_proc	0	I/O
 762	pg_proc	0	storage manager
@@ -276,6 +288,7 @@
 1036	pg_proc	0	remove ACL item
 1037	pg_proc	0	contains
 1365	pg_proc	0	make ACL item
+3943	pg_proc	0	TODO
 1689	pg_proc	0	convert ACL item array to table, for use by information schema
 1044	pg_proc	0	I/O
 1045	pg_proc	0	I/O
@@ -293,6 +306,7 @@
 1084	pg_proc	0	I/O
 1085	pg_proc	0	I/O
 1092	pg_proc	0	less-equal-greater
+3136	pg_proc	0	sort support
 1107	pg_proc	0	less-equal-greater
 1138	pg_proc	0	larger of two
 1139	pg_proc	0	smaller of two
@@ -329,6 +343,7 @@
 1197	pg_proc	0	smaller of two
 1198	pg_proc	0	larger of two
 1199	pg_proc	0	date difference preserving months and years
+3918	pg_proc	0	transform an interval length coercion
 1200	pg_proc	0	adjust interval precision
 1215	pg_proc	0	get description for object id and catalog name
 1216	pg_proc	0	get description for table column
@@ -565,6 +580,7 @@
 1686	pg_proc	0	list of SQL keywords
 2289	pg_proc	0	convert generic options array to name/value table
 1619	pg_proc	0	type of the argument
+3162	pg_proc	0	collation of the argument; implementation of the COLLATION FOR expression
 1250	pg_proc	0	deferred UNIQUE constraint check
 1644	pg_proc	0	referential integrity FOREIGN KEY ... REFERENCES
 1645	pg_proc	0	referential integrity FOREIGN KEY ... REFERENCES
@@ -585,6 +601,7 @@
 1683	pg_proc	0	convert int4 to bitstring
 1684	pg_proc	0	convert bitstring to int4
 1685	pg_proc	0	adjust bit() to typmod length
+3158	pg_proc	0	transform a varbit length coercion
 1687	pg_proc	0	adjust varbit() to typmod length
 1698	pg_proc	0	position of sub-bitstring
 1699	pg_proc	0	extract portion of bitstring
@@ -626,6 +643,7 @@
 1702	pg_proc	0	I/O
 2917	pg_proc	0	I/O typmod
 2918	pg_proc	0	I/O typmod
+3157	pg_proc	0	transform a numeric length coercion
 1703	pg_proc	0	adjust numeric to typmod precision/scale
 1705	pg_proc	0	absolute value
 1706	pg_proc	0	sign of value
@@ -748,6 +766,9 @@
 3535	pg_proc	0	aggregate transition function
 3536	pg_proc	0	aggregate final function
 3538	pg_proc	0	concatenate aggregate input into a string
+3543	pg_proc	0	aggregate transition function
+3544	pg_proc	0	aggregate final function
+3545	pg_proc	0	concatenate aggregate input into a bytea
 1845	pg_proc	0	encode text from DB encoding to ASCII text
 1846	pg_proc	0	encode text from encoding to ASCII text
 1847	pg_proc	0	encode text from encoding to ASCII text
@@ -830,19 +851,26 @@
 3068	pg_proc	0	statistics: recovery conflicts in database caused by shared buffer pin
 3069	pg_proc	0	statistics: recovery conflicts in database caused by buffer deadlock
 3070	pg_proc	0	statistics: recovery conflicts in database
+3152	pg_proc	0	statistics: deadlocks detected in database
 3074	pg_proc	0	statistics: last reset for a database
+3150	pg_proc	0	statistics: number of temporary files written
+3151	pg_proc	0	statistics: number of bytes in temporary files written
+2844	pg_proc	0	statistics: block read time, in msec
+2845	pg_proc	0	statistics: block write time, in msec
 2769	pg_proc	0	statistics: number of timed checkpoints started by the bgwriter
 2770	pg_proc	0	statistics: number of backend requested checkpoints started by the bgwriter
 2771	pg_proc	0	statistics: number of buffers written by the bgwriter during checkpoints
 2772	pg_proc	0	statistics: number of buffers written by the bgwriter for cleaning dirty buffers
 2773	pg_proc	0	statistics: number of times the bgwriter stopped processing when it had written too many buffers while cleaning
 3075	pg_proc	0	statistics: last reset for the bgwriter
+3160	pg_proc	0	statistics: checkpoint time spent writing buffers to disk, in msec
+3161	pg_proc	0	statistics: checkpoint time spent synchronizing buffers to disk, in msec
 2775	pg_proc	0	statistics: number of buffers written by backends
 3063	pg_proc	0	statistics: number of backend buffer writes that did their own fsync
 2859	pg_proc	0	statistics: number of buffer allocations
 2978	pg_proc	0	statistics: number of function calls
-2979	pg_proc	0	statistics: execution time of function
-2980	pg_proc	0	statistics: self execution time of function
+2979	pg_proc	0	statistics: total execution time of function, in msec
+2980	pg_proc	0	statistics: self execution time of function, in msec
 3037	pg_proc	0	statistics: number of scans done for table/index in current transaction
 3038	pg_proc	0	statistics: number of tuples read by seqscan in current transaction
 3039	pg_proc	0	statistics: number of tuples fetched by idxscan in current transaction
@@ -853,16 +881,20 @@
 3044	pg_proc	0	statistics: number of blocks fetched in current transaction
 3045	pg_proc	0	statistics: number of blocks found in cache in current transaction
 3046	pg_proc	0	statistics: number of function calls in current transaction
-3047	pg_proc	0	statistics: execution time of function in current transaction
-3048	pg_proc	0	statistics: self execution time of function in current transaction
+3047	pg_proc	0	statistics: total execution time of function in current transaction, in msec
+3048	pg_proc	0	statistics: self execution time of function in current transaction, in msec
 2230	pg_proc	0	statistics: discard current transaction's statistics snapshot
 2274	pg_proc	0	statistics: reset collected statistics for current database
 3775	pg_proc	0	statistics: reset collected statistics shared across the cluster
 3776	pg_proc	0	statistics: reset collected statistics for a single table or index in the current database
 3777	pg_proc	0	statistics: reset collected statistics for a single function in the current database
+3163	pg_proc	0	current trigger depth
+3778	pg_proc	0	tablespace location
 1946	pg_proc	0	convert bytea value into some ascii-only text string
 1947	pg_proc	0	convert ascii-encoded text string into bytea value
 1954	pg_proc	0	less-equal-greater
+3917	pg_proc	0	transform a timestamp length coercion
+3944	pg_proc	0	transform a time length coercion
 1961	pg_proc	0	adjust timestamp precision
 1965	pg_proc	0	larger of two
 1966	pg_proc	0	smaller of two
@@ -899,6 +931,7 @@
 2043	pg_proc	0	intervals overlap?
 2044	pg_proc	0	intervals overlap?
 2045	pg_proc	0	less-equal-greater
+3137	pg_proc	0	sort support
 2046	pg_proc	0	convert time with time zone to time
 2047	pg_proc	0	convert time to time with time zone
 2048	pg_proc	0	finite timestamp?
@@ -922,6 +955,7 @@
 2081	pg_proc	0	is function visible in search path?
 2082	pg_proc	0	is operator visible in search path?
 2083	pg_proc	0	is opclass visible in search path?
+3829	pg_proc	0	is opfamily visible in search path?
 2093	pg_proc	0	is conversion visible in search path?
 3756	pg_proc	0	is text search parser visible in search path?
 3757	pg_proc	0	is text search dictionary visible in search path?
@@ -940,6 +974,8 @@
 2852	pg_proc	0	current xlog insert location
 2850	pg_proc	0	xlog filename and byte offset, given an xlog location
 2851	pg_proc	0	xlog filename, given an xlog location
+3165	pg_proc	0	difference in bytes, given two xlog locations
+3809	pg_proc	0	export a snapshot
 3810	pg_proc	0	true if server is in recovery
 3820	pg_proc	0	current xlog flush location
 3821	pg_proc	0	last xlog replay location
@@ -1126,6 +1162,12 @@
 3009	pg_proc	0	user privilege on server by user oid, server oid
 3010	pg_proc	0	current user privilege on server by server name
 3011	pg_proc	0	current user privilege on server by server oid
+3138	pg_proc	0	user privilege on type by username, type name
+3139	pg_proc	0	user privilege on type by username, type oid
+3140	pg_proc	0	user privilege on type by user oid, type name
+3141	pg_proc	0	user privilege on type by user oid, type oid
+3142	pg_proc	0	current user privilege on type by type name
+3143	pg_proc	0	current user privilege on type by type oid
 2705	pg_proc	0	user privilege on role by username, role name
 2706	pg_proc	0	user privilege on role by username, role oid
 2707	pg_proc	0	user privilege on role by user oid, role name
@@ -1141,6 +1183,7 @@
 2332	pg_proc	0	disk space usage for the specified fork of a table or index
 2286	pg_proc	0	total disk space usage for the specified table and associated indexes
 2288	pg_proc	0	convert a long int to a human readable text using size units
+3166	pg_proc	0	convert a numeric to a human readable text using size units
 2997	pg_proc	0	disk space usage for the specified table, including TOAST, free space and visibility map
 2998	pg_proc	0	disk space usage for all indexes attached to the specified table
 2999	pg_proc	0	filenode identifier of relation
@@ -1291,6 +1334,7 @@
 2504	pg_proc	0	source text of a rule with pretty-print option
 2505	pg_proc	0	select statement of a view with pretty-print option
 2506	pg_proc	0	select statement of a view with pretty-print option
+3159	pg_proc	0	select statement of a view with pretty-printing and specified line wrapping
 2507	pg_proc	0	index description (full create statement or single expression) with pretty-print option
 2508	pg_proc	0	constraint description with pretty-print option
 2509	pg_proc	0	deparse an encoded expression with pretty-print option
@@ -1410,6 +1454,14 @@
 3051	pg_proc	0	determine if a string is well formed XML
 3052	pg_proc	0	determine if a string is well formed XML document
 3053	pg_proc	0	determine if a string is well formed XML content
+321	pg_proc	0	I/O
+322	pg_proc	0	I/O
+323	pg_proc	0	I/O
+324	pg_proc	0	I/O
+3153	pg_proc	0	map array to json
+3154	pg_proc	0	map array to json with optional pretty printing
+3155	pg_proc	0	map row to json
+3156	pg_proc	0	map row to json with optional pretty printing
 2952	pg_proc	0	I/O
 2953	pg_proc	0	I/O
 2960	pg_proc	0	less-equal-greater
@@ -1555,10 +1607,98 @@
 3112	pg_proc	0	fetch the first row value
 3113	pg_proc	0	fetch the last row value
 3114	pg_proc	0	fetch the Nth row value
+3832	pg_proc	0	I/O
+3833	pg_proc	0	I/O
+3834	pg_proc	0	I/O
+3835	pg_proc	0	I/O
+3836	pg_proc	0	I/O
+3837	pg_proc	0	I/O
+3848	pg_proc	0	lower bound of range
+3849	pg_proc	0	upper bound of range
+3850	pg_proc	0	is the range empty?
+3851	pg_proc	0	is the range's lower bound inclusive?
+3852	pg_proc	0	is the range's upper bound inclusive?
+3853	pg_proc	0	is the range's lower bound infinite?
+3854	pg_proc	0	is the range's upper bound infinite?
+3855	pg_proc	0	implementation of = operator
+3856	pg_proc	0	implementation of <> operator
+3857	pg_proc	0	implementation of && operator
+3858	pg_proc	0	implementation of @> operator
+3859	pg_proc	0	implementation of @> operator
+3860	pg_proc	0	implementation of <@ operator
+3861	pg_proc	0	implementation of <@ operator
+3862	pg_proc	0	implementation of -|- operator
+3863	pg_proc	0	implementation of << operator
+3864	pg_proc	0	implementation of >> operator
+3865	pg_proc	0	implementation of &< operator
+3866	pg_proc	0	implementation of &> operator
+3867	pg_proc	0	implementation of + operator
+3868	pg_proc	0	implementation of * operator
+3869	pg_proc	0	implementation of - operator
+3870	pg_proc	0	less-equal-greater
+3875	pg_proc	0	GiST support
+3876	pg_proc	0	GiST support
+3877	pg_proc	0	GiST support
+3878	pg_proc	0	GiST support
+3879	pg_proc	0	GiST support
+3880	pg_proc	0	GiST support
+3881	pg_proc	0	GiST support
+3902	pg_proc	0	hash a range
+3916	pg_proc	0	range typanalyze
+3914	pg_proc	0	convert an int4 range to canonical form
+3928	pg_proc	0	convert an int8 range to canonical form
+3915	pg_proc	0	convert a date range to canonical form
+3922	pg_proc	0	float8 difference of two int4 values
+3923	pg_proc	0	float8 difference of two int8 values
+3924	pg_proc	0	float8 difference of two numeric values
+3925	pg_proc	0	float8 difference of two date values
+3929	pg_proc	0	float8 difference of two timestamp values
+3930	pg_proc	0	float8 difference of two timestamp with time zone values
+3840	pg_proc	0	int4range constructor
+3841	pg_proc	0	int4range constructor
+3844	pg_proc	0	numrange constructor
+3845	pg_proc	0	numrange constructor
+3933	pg_proc	0	tsrange constructor
+3934	pg_proc	0	tsrange constructor
+3937	pg_proc	0	tstzrange constructor
+3938	pg_proc	0	tstzrange constructor
+3941	pg_proc	0	daterange constructor
+3942	pg_proc	0	daterange constructor
+3945	pg_proc	0	int8range constructor
+3946	pg_proc	0	int8range constructor
+4001	pg_proc	0	spgist(internal)
+4002	pg_proc	0	spgist(internal)
+4003	pg_proc	0	spgist(internal)
+4004	pg_proc	0	spgist(internal)
+4005	pg_proc	0	spgist(internal)
+4006	pg_proc	0	spgist(internal)
+4007	pg_proc	0	spgist(internal)
+4008	pg_proc	0	spgist(internal)
+4009	pg_proc	0	spgist(internal)
+4010	pg_proc	0	spgist(internal)
+4011	pg_proc	0	spgist(internal)
+4012	pg_proc	0	spgist(internal)
+4032	pg_proc	0	spgist(internal)
+4013	pg_proc	0	spgist(internal)
+4014	pg_proc	0	spgist(internal)
+4018	pg_proc	0	SP-GiST support for quad tree over point
+4019	pg_proc	0	SP-GiST support for quad tree over point
+4020	pg_proc	0	SP-GiST support for quad tree over point
+4021	pg_proc	0	SP-GiST support for quad tree over point
+4022	pg_proc	0	SP-GiST support for quad tree and k-d tree over point
+4023	pg_proc	0	SP-GiST support for k-d tree over point
+4024	pg_proc	0	SP-GiST support for k-d tree over point
+4025	pg_proc	0	SP-GiST support for k-d tree over point
+4026	pg_proc	0	SP-GiST support for k-d tree over point
+4027	pg_proc	0	SP-GiST support for suffix tree over text
+4028	pg_proc	0	SP-GiST support for suffix tree over text
+4029	pg_proc	0	SP-GiST support for suffix tree over text
+4030	pg_proc	0	SP-GiST support for suffix tree over text
+4031	pg_proc	0	SP-GiST support for suffix tree over text
 16	pg_type	0	boolean, 'true'/'false'
 17	pg_type	0	variable-length string, binary values escaped
 18	pg_type	0	single character
-19	pg_type	0	63-character type for storing system identifiers
+19	pg_type	0	63-byte type for storing system identifiers
 20	pg_type	0	~18 digit integer, 8-byte storage
 21	pg_type	0	-32 thousand to 32 thousand, 2-byte storage
 22	pg_type	0	array of int2, used in system tables
@@ -1614,6 +1754,12 @@
 3734	pg_type	0	registered text search configuration
 3769	pg_type	0	registered text search dictionary
 2970	pg_type	0	txid snapshot
+3904	pg_type	0	range of integers
+3906	pg_type	0	range of numerics
+3908	pg_type	0	range of timestamps without time zone
+3910	pg_type	0	range of timestamps with time zone
+3912	pg_type	0	range of dates
+3926	pg_type	0	range of bigints
 15	pg_operator	0	equal
 36	pg_operator	0	not equal
 37	pg_operator	0	less than
@@ -2081,6 +2227,9 @@
 1223	pg_operator	0	less than or equal
 1224	pg_operator	0	greater than
 1225	pg_operator	0	greater than or equal
+3147	pg_operator	0	bitwise not
+3148	pg_operator	0	bitwise and
+3149	pg_operator	0	bitwise or
 1201	pg_operator	0	equal
 1202	pg_operator	0	not equal
 1203	pg_operator	0	less than
@@ -2320,10 +2469,30 @@
 2991	pg_operator	0	greater than
 2992	pg_operator	0	less than or equal
 2993	pg_operator	0	greater than or equal
+3882	pg_operator	0	equal
+3883	pg_operator	0	not equal
+3884	pg_operator	0	less than
+3885	pg_operator	0	less than or equal
+3886	pg_operator	0	greater than or equal
+3887	pg_operator	0	greater than
+3888	pg_operator	0	overlaps
+3889	pg_operator	0	contains
+3890	pg_operator	0	contains
+3891	pg_operator	0	is contained by
+3892	pg_operator	0	is contained by
+3893	pg_operator	0	is left of
+3894	pg_operator	0	is right of
+3895	pg_operator	0	overlaps or is left of
+3896	pg_operator	0	overlaps or is right of
+3897	pg_operator	0	is adjacent to
+3898	pg_operator	0	range union
+3899	pg_operator	0	range difference
+3900	pg_operator	0	range intersection
 403	pg_am	0	b-tree index access method
 405	pg_am	0	hash index access method
 783	pg_am	0	GiST index access method
 2742	pg_am	0	GIN index access method
+4000	pg_am	0	SP-GiST index access method
 12	pg_language	0	built-in functions
 13	pg_language	0	dynamically-loaded C functions
 14	pg_language	0	SQL-language functions
