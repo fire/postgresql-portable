@@ -1,17 +1,31 @@
 @rem = '--*-Perl-*--
 @echo off
 if "%OS%" == "Windows_NT" goto WinNT
+IF EXIST "%~dp0perl.exe" (
+"%~dp0perl.exe" -x -S "%0" %1 %2 %3 %4 %5 %6 %7 %8 %9
+) ELSE IF EXIST "%~dp0..\..\bin\perl.exe" (
+"%~dp0..\..\bin\perl.exe" -x -S "%0" %1 %2 %3 %4 %5 %6 %7 %8 %9
+) ELSE (
 perl -x -S "%0" %1 %2 %3 %4 %5 %6 %7 %8 %9
+)
+
 goto endofperl
 :WinNT
+IF EXIST "%~dp0perl.exe" (
+"%~dp0perl.exe" -x -S %0 %*
+) ELSE IF EXIST "%~dp0..\..\bin\perl.exe" (
+"%~dp0..\..\bin\perl.exe" -x -S %0 %*
+) ELSE (
 perl -x -S %0 %*
+)
+
 if NOT "%COMSPEC%" == "%SystemRoot%\system32\cmd.exe" goto endofperl
 if %errorlevel% == 9009 echo You do not have Perl in your PATH.
 if errorlevel 1 goto script_failed_so_exit_with_non_zero_val 2>nul
 goto endofperl
 @rem ';
 #!perl
-#line 15
+#line 29
     eval 'exec C:\strawberry\perl\bin\perl.exe -S $0 ${1+"$@"}'
 	if $running_under_some_shell;
 
@@ -75,7 +89,7 @@ while (defined (my $file = next_file())) {
     $t = '';
     $tab = 0;
 
-    # $eval_index goes into ``#line'' directives, to help locate syntax errors:
+    # $eval_index goes into '#line' directives, to help locate syntax errors:
     $eval_index = 1;
 
     if ($file eq '-') {
@@ -130,24 +144,22 @@ while (defined (my $file = next_file())) {
 		} else {
 		    s/^\s+//;
 		    expr();
+
 		    $new = 1 if $new eq '';
+
+		    # Shunt around such directives as '#define FOO FOO':
+		    next if $new =~ /^\s*&\Q$name\E\s*\z/;
+
 		    $new = reindent($new);
 		    $args = reindent($args);
-		    if ($t ne '') {
-			$new =~ s/(['\\])/\\$1/g;        #']);
+		    $new =~ s/(['\\])/\\$1/g;        #']);
 
-			if ($opt_h) {
-			    print OUT $t,"eval \"\\n#line $eval_index $outfile\\n\" . 'sub $name () {",$new,";}' unless defined(\&$name);\n";
-			    $eval_index++;
-			} else {
-			    print OUT $t,"eval 'sub $name () {",$new,";}' unless defined(\&$name);\n";
-			}
-		    } else {
-		    	# Shunt around such directives as `#define FOO FOO':
-		    	next if " \&$name" eq $new;
-
-                      print OUT $t,"unless(defined(\&$name)) {\n    sub $name () {\t",$new,";}\n}\n";
+	    	    print OUT $t, 'eval ';
+		    if ($opt_h) {
+			print OUT "\"\\n#line $eval_index $outfile\\n\" . ";
+			$eval_index++;
 		    }
+		    print OUT "'sub $name () {$new;}' unless defined(&$name);\n";
 		}
 	    } elsif (/^(include|import|include_next)\s*([<\"])(.*)[>\"]/) {
                 $incl_type = $1;
@@ -639,12 +651,12 @@ sub next_file
             if ($opt_r) {
                 expand_glob($file);
             } else {
-                print STDERR "Skipping directory `$file'\n";
+                print STDERR "Skipping directory '$file'\n";
             }
         } elsif ($opt_a) {
             return $file;
         } else {
-            print STDERR "Skipping `$file':  not a file or directory\n";
+            print STDERR "Skipping '$file':  not a file or directory\n";
         }
     }
 
@@ -824,7 +836,7 @@ sub _extract_cc_defines
     my $allsymbols  = join " ",
 	@Config{'ccsymbols', 'cppsymbols', 'cppccsymbols'};
 
-    # Split compiler pre-definitions into `key=value' pairs:
+    # Split compiler pre-definitions into 'key=value' pairs:
     while ($allsymbols =~ /([^\s]+)=((\\\s|[^\s])+)/g) {
 	$define{$1} = $2;
 	if ($opt_D) {
@@ -901,7 +913,7 @@ is not specified, then links are skipped over.
 
 =item -h
 
-Put ``hints'' in the .ph files which will help in locating problems with
+Put 'hints' in the .ph files which will help in locating problems with
 I<h2ph>.  In those cases when you B<require> a B<.ph> file containing syntax
 errors, instead of the cryptic
 
@@ -920,7 +932,7 @@ This is primarily used for debugging I<h2ph>.
 
 =item -Q
 
-``Quiet'' mode; don't print out the names of the files being converted.
+'Quiet' mode; don't print out the names of the files being converted.
 
 =back
 

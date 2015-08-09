@@ -1,17 +1,31 @@
 @rem = '--*-Perl-*--
 @echo off
 if "%OS%" == "Windows_NT" goto WinNT
+IF EXIST "%~dp0perl.exe" (
+"%~dp0perl.exe" -x -S "%0" %1 %2 %3 %4 %5 %6 %7 %8 %9
+) ELSE IF EXIST "%~dp0..\..\bin\perl.exe" (
+"%~dp0..\..\bin\perl.exe" -x -S "%0" %1 %2 %3 %4 %5 %6 %7 %8 %9
+) ELSE (
 perl -x -S "%0" %1 %2 %3 %4 %5 %6 %7 %8 %9
+)
+
 goto endofperl
 :WinNT
+IF EXIST "%~dp0perl.exe" (
+"%~dp0perl.exe" -x -S %0 %*
+) ELSE IF EXIST "%~dp0..\..\bin\perl.exe" (
+"%~dp0..\..\bin\perl.exe" -x -S %0 %*
+) ELSE (
 perl -x -S %0 %*
+)
+
 if NOT "%COMSPEC%" == "%SystemRoot%\system32\cmd.exe" goto endofperl
 if %errorlevel% == 9009 echo You do not have Perl in your PATH.
 if errorlevel 1 goto script_failed_so_exit_with_non_zero_val 2>nul
 goto endofperl
 @rem ';
 #!perl
-#line 15
+#line 29
     eval 'exec C:\strawberry\perl\bin\perl.exe -S $0 ${1+"$@"}'
 	if $running_under_some_shell;
 =pod
@@ -24,7 +38,7 @@ pod2html - convert .pod files to .html files
 
     pod2html --help --htmlroot=<name> --infile=<name> --outfile=<name>
              --podpath=<name>:...:<name> --podroot=<name>
-             --libpods=<name>:...:<name> --recurse --norecurse --verbose
+             --recurse --norecurse --verbose
              --index --noindex --title=<name>
 
 =head1 DESCRIPTION
@@ -76,24 +90,6 @@ Specify the base directory for finding library pods.
 
 Specify which subdirectories of the podroot contain pod files whose
 HTML converted forms can be linked-to in cross-references.
-
-=item libpods
-
-  --libpods=name:...:name
-
-List of page names (eg, "perlfunc") which contain linkable C<=item>s.
-
-=item netscape
-
-  --netscape
-
-Use Netscape HTML directives when applicable.
-
-=item nonetscape
-
-  --nonetscape
-
-Do not use Netscape HTML directives (default).
 
 =item index
 

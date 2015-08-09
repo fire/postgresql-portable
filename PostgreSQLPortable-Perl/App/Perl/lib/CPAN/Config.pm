@@ -91,6 +91,11 @@ $CPAN::Config = {
   wget                          => q[],
   yaml_load_code                => q[0],
   yaml_module                   => q[YAML::XS],
+};eval {
+	require Portable;
+	Portable->import('CPAN');
 };
+
+
 1;
 __END__

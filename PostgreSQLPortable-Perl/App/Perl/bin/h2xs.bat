@@ -1,17 +1,31 @@
 @rem = '--*-Perl-*--
 @echo off
 if "%OS%" == "Windows_NT" goto WinNT
+IF EXIST "%~dp0perl.exe" (
+"%~dp0perl.exe" -x -S "%0" %1 %2 %3 %4 %5 %6 %7 %8 %9
+) ELSE IF EXIST "%~dp0..\..\bin\perl.exe" (
+"%~dp0..\..\bin\perl.exe" -x -S "%0" %1 %2 %3 %4 %5 %6 %7 %8 %9
+) ELSE (
 perl -x -S "%0" %1 %2 %3 %4 %5 %6 %7 %8 %9
+)
+
 goto endofperl
 :WinNT
+IF EXIST "%~dp0perl.exe" (
+"%~dp0perl.exe" -x -S %0 %*
+) ELSE IF EXIST "%~dp0..\..\bin\perl.exe" (
+"%~dp0..\..\bin\perl.exe" -x -S %0 %*
+) ELSE (
 perl -x -S %0 %*
+)
+
 if NOT "%COMSPEC%" == "%SystemRoot%\system32\cmd.exe" goto endofperl
 if %errorlevel% == 9009 echo You do not have Perl in your PATH.
 if errorlevel 1 goto script_failed_so_exit_with_non_zero_val 2>nul
 goto endofperl
 @rem ';
 #!perl
-#line 15
+#line 29
     eval 'exec C:\strawberry\perl\bin\perl.exe -S $0 ${1+"$@"}'
 	if $running_under_some_shell;
 
@@ -769,7 +783,7 @@ if( @path_h ){
     }
     else {
       @paths = (File::Spec->curdir(), $Config{usrinc},
-		(split ' ', $Config{locincpth}), '/usr/include');
+		(split / +/, $Config{locincpth} // ""), '/usr/include');
     }
     foreach my $path_h (@path_h) {
         $name ||= $path_h;
@@ -873,7 +887,7 @@ if( @path_h ){
       }
       else {
 	# Work from miniperl too - on "normal" systems
-        my $SEEK_SET = eval 'use Fcntl qw/SEEK_SET/; SEEK_SET' or 0;
+        my $SEEK_SET = eval 'use Fcntl qw/SEEK_SET/; SEEK_SET' || 0;
         seek CH, 0, $SEEK_SET;
         my $src = do { local $/; <CH> };
         close CH;
@@ -2073,8 +2087,8 @@ my $tests = @const_names ? 2 : 1;
 open EX, ">$testfile" or die "Can't create $ext$modpname/$testfile: $!\n";
 
 print EX <<_END_;
-# Before `make install' is performed this script should be runnable with
-# `make test'. After `make install' it should work as `perl $modpname.t'
+# Before 'make install' is performed this script should be runnable with
+# 'make test'. After 'make install' it should work as 'perl $modpname.t'
 
 #########################
 

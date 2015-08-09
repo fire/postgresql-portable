@@ -1,17 +1,31 @@
 @rem = '--*-Perl-*--
 @echo off
 if "%OS%" == "Windows_NT" goto WinNT
+IF EXIST "%~dp0perl.exe" (
+"%~dp0perl.exe" -x -S "%0" %1 %2 %3 %4 %5 %6 %7 %8 %9
+) ELSE IF EXIST "%~dp0..\..\bin\perl.exe" (
+"%~dp0..\..\bin\perl.exe" -x -S "%0" %1 %2 %3 %4 %5 %6 %7 %8 %9
+) ELSE (
 perl -x -S "%0" %1 %2 %3 %4 %5 %6 %7 %8 %9
+)
+
 goto endofperl
 :WinNT
+IF EXIST "%~dp0perl.exe" (
+"%~dp0perl.exe" -x -S %0 %*
+) ELSE IF EXIST "%~dp0..\..\bin\perl.exe" (
+"%~dp0..\..\bin\perl.exe" -x -S %0 %*
+) ELSE (
 perl -x -S %0 %*
+)
+
 if NOT "%COMSPEC%" == "%SystemRoot%\system32\cmd.exe" goto endofperl
 if %errorlevel% == 9009 echo You do not have Perl in your PATH.
 if errorlevel 1 goto script_failed_so_exit_with_non_zero_val 2>nul
 goto endofperl
 @rem ';
 #!perl -w
-#line 15
+#line 29
 $0 =~ s|\.bat||i;
 unless (-f $0) {
     $0 =~ s|.*[/\\]||;
@@ -19,10 +33,10 @@ unless (-f $0) {
 	$_ = "." if $_ eq "";
 	$0 = "$_/$0" , goto doit if -f "$_/$0";
     }
-    die "`$0' not found.\n";
+    die "'$0' not found.\n";
 }
 doit: exec "perl", "-x", $0, @ARGV;
-die "Failed to exec `$0': $!";
+die "Failed to exec '$0': $!";
 __END__
 
 =head1 NAME
@@ -33,10 +47,10 @@ runperl.bat - "universal" batch file to run perl scripts
 
 	C:\> copy runperl.bat foo.bat
 	C:\> foo
-	[..runs the perl script `foo'..]
+	[..runs the perl script 'foo'..]
 	
 	C:\> foo.bat
-	[..runs the perl script `foo'..]
+	[..runs the perl script 'foo'..]
 	
 
 =head1 DESCRIPTION

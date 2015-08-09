@@ -3,7 +3,6 @@ C:\strawberry\perl\bin\instmodsh.bat
 C:\strawberry\perl\lib\ExtUtils\Command\MM.pm
 C:\strawberry\perl\lib\ExtUtils\Liblist.pm
 C:\strawberry\perl\lib\ExtUtils\Liblist\Kid.pm
-C:\strawberry\perl\lib\ExtUtils\MANIFEST.SKIP
 C:\strawberry\perl\lib\ExtUtils\MM.pm
 C:\strawberry\perl\lib\ExtUtils\MM_AIX.pm
 C:\strawberry\perl\lib\ExtUtils\MM_Any.pm
@@ -26,7 +25,6 @@ C:\strawberry\perl\lib\ExtUtils\MakeMaker.pm
 C:\strawberry\perl\lib\ExtUtils\MakeMaker\Config.pm
 C:\strawberry\perl\lib\ExtUtils\MakeMaker\FAQ.pod
 C:\strawberry\perl\lib\ExtUtils\MakeMaker\Tutorial.pod
-C:\strawberry\perl\lib\ExtUtils\Manifest.pm
 C:\strawberry\perl\lib\ExtUtils\Mkbootstrap.pm
 C:\strawberry\perl\lib\ExtUtils\Mksymlists.pm
 C:\strawberry\perl\lib\ExtUtils\testlib.pm
