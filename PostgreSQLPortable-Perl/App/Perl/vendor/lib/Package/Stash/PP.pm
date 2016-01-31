@@ -2,9 +2,7 @@ package Package::Stash::PP;
 BEGIN {
   $Package::Stash::PP::AUTHORITY = 'cpan:DOY';
 }
-{
-  $Package::Stash::PP::VERSION = '0.34';
-}
+$Package::Stash::PP::VERSION = '0.37';
 use strict;
 use warnings;
 # ABSTRACT: pure perl implementation of the Package::Stash API
@@ -87,10 +85,6 @@ sub namespace {
     }
 }
 
-sub _is_anon {
-    return !defined $_[0]->{package};
-}
-
 {
     my %SIGIL_MAP = (
         '$' => 'SCALAR',
@@ -101,7 +95,7 @@ sub _is_anon {
     );
 
     sub _deconstruct_variable_name {
-        my ($self, $variable) = @_;
+        my ($variable) = @_;
 
         my @ret;
         if (ref($variable) eq 'HASH') {
@@ -132,7 +126,6 @@ sub _is_anon {
 }
 
 sub _valid_for_type {
-    my $self = shift;
     my ($value, $type) = @_;
     if ($type eq 'HASH' || $type eq 'ARRAY'
      || $type eq 'IO'   || $type eq 'CODE') {
@@ -147,10 +140,10 @@ sub _valid_for_type {
 sub add_symbol {
     my ($self, $variable, $initial_value, %opts) = @_;
 
-    my ($name, $sigil, $type) = $self->_deconstruct_variable_name($variable);
+    my ($name, $sigil, $type) = _deconstruct_variable_name($variable);
 
     if (@_ > 2) {
-        $self->_valid_for_type($initial_value, $type)
+        _valid_for_type($initial_value, $type)
             || confess "$initial_value is not of type $type";
 
         # cheap fail-fast check for PERLDBf_SUBLINE and '&'
@@ -181,7 +174,7 @@ sub add_symbol {
                 *{ $self->name . '::' . $name };
             }
             else {
-                my $undef = $self->_undef_ref_for_type($type);
+                my $undef = _undef_ref_for_type($type);
                 *{ $self->name . '::' . $name } = $undef;
             }
         }
@@ -195,6 +188,7 @@ sub add_symbol {
             local *__ANON__:: = $namespace;
             no strict 'refs';
             no warnings 'void';
+            no warnings 'once';
             *{"__ANON__::$name"};
         }
 
@@ -205,13 +199,12 @@ sub add_symbol {
         }
         else {
             return if BROKEN_ISA_ASSIGNMENT && $name eq 'ISA';
-            *{ $namespace->{$name} } = $self->_undef_ref_for_type($type);
+            *{ $namespace->{$name} } = _undef_ref_for_type($type);
         }
     }
 }
 
 sub _undef_ref_for_type {
-    my $self = shift;
     my ($type) = @_;
 
     if ($type eq 'ARRAY') {
@@ -242,7 +235,7 @@ sub remove_glob {
 sub has_symbol {
     my ($self, $variable) = @_;
 
-    my ($name, $sigil, $type) = $self->_deconstruct_variable_name($variable);
+    my ($name, $sigil, $type) = _deconstruct_variable_name($variable);
 
     my $namespace = $self->namespace;
 
@@ -275,7 +268,7 @@ sub has_symbol {
 sub get_symbol {
     my ($self, $variable, %opts) = @_;
 
-    my ($name, $sigil, $type) = $self->_deconstruct_variable_name($variable);
+    my ($name, $sigil, $type) = _deconstruct_variable_name($variable);
 
     my $namespace = $self->namespace;
 
@@ -295,7 +288,7 @@ sub get_symbol {
     }
     else {
         if ($type eq 'CODE') {
-            if (BROKEN_GLOB_ASSIGNMENT || !$self->_is_anon) {
+            if (BROKEN_GLOB_ASSIGNMENT || defined($self->{package})) {
                 no strict 'refs';
                 return \&{ $self->name . '::' . $name };
             }
@@ -329,7 +322,7 @@ sub get_or_add_symbol {
 sub remove_symbol {
     my ($self, $variable) = @_;
 
-    my ($name, $sigil, $type) = $self->_deconstruct_variable_name($variable);
+    my ($name, $sigil, $type) = _deconstruct_variable_name($variable);
 
     # FIXME:
     # no doubt this is grossly inefficient and
@@ -423,13 +416,15 @@ __END__
 
 =pod
 
+=encoding UTF-8
+
 =head1 NAME
 
 Package::Stash::PP - pure perl implementation of the Package::Stash API
 
 =head1 VERSION
 
-version 0.34
+version 0.37
 
 =head1 SYNOPSIS
 
@@ -523,11 +518,11 @@ remove_glob
 
 =head1 AUTHOR
 
-Jesse Luehrs <doy at tozt dot net>
+Jesse Luehrs <doy@tozt.net>
 
 =head1 COPYRIGHT AND LICENSE
 
-This software is copyright (c) 2013 by Jesse Luehrs.
+This software is copyright (c) 2014 by Jesse Luehrs.
 
 This is free software; you can redistribute it and/or modify it under
 the same terms as the Perl 5 programming language system itself.

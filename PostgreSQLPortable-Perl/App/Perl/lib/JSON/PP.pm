@@ -11,7 +11,7 @@ use Carp ();
 use B ();
 #use Devel::Peek;
 
-$JSON::PP::VERSION = '2.27200';
+$JSON::PP::VERSION = '2.27300';
 
 @JSON::PP::EXPORT = qw(encode_json decode_json from_json to_json);
 
@@ -655,6 +655,7 @@ BEGIN {
         }
         else {
             utf8::upgrade( $text );
+            utf8::encode( $text );
         }
 
         $len = length $text;
@@ -806,17 +807,12 @@ BEGIN {
                 else{
 
                     if ( ord $ch  > 127 ) {
-                        if ( $utf8 ) {
-                            unless( $ch = is_valid_utf8($ch) ) {
-                                $at -= 1;
-                                decode_error("malformed UTF-8 character in JSON string");
-                            }
-                            else {
-                                $at += $utf8_len - 1;
-                            }
+                        unless( $ch = is_valid_utf8($ch) ) {
+                            $at -= 1;
+                            decode_error("malformed UTF-8 character in JSON string");
                         }
                         else {
-                            utf8::encode( $ch );
+                            $at += $utf8_len - 1;
                         }
 
                         $is_utf8 = 1;
@@ -1564,7 +1560,7 @@ sub _incr_parse {
     $self->{incr_text} = substr( $self->{incr_text}, $p );
     $self->{incr_p} = 0;
 
-    return $obj or '';
+    return $obj || '';
 }
 
 
@@ -1630,32 +1626,14 @@ JSON::PP - JSON::XS compatible pure-Perl module.
 
 =head1 VERSION
 
-    2.27200
+    2.27300
 
 L<JSON::XS> 2.27 (~2.30) compatible.
 
 =head1 NOTE
 
-JSON::PP was inculded in JSON distribution (CPAN module).
-It comes to be a perl core module in Perl 5.14.
-
-    [STEPS]
-
-    * release this module as JSON::PPdev.
-
-    * release other PP::* modules as JSON::PP::Compat*.
-
-    * JSON distribution will inculde yet another JSON::PP modules.
-      They are JSNO::backportPP. So JSON.pm should work as it did at all!
-
-    * remove JSON::PP and JSON::PP::* modules from JSON distribution
-       and release it as developer version.
-
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-    * release JSON distribution as stable version.
-
-    * rename JSON::PPdev into JSON::PP and release on CPAN. <<<< HERE
+JSON::PP had been inculded in JSON distribution (CPAN module).
+It was a perl core module in Perl 5.14.
 
 =head1 DESCRIPTION
 
@@ -2809,7 +2787,7 @@ Makamaka Hannyaharamitu, E<lt>makamaka[at]cpan.orgE<gt>
 
 =head1 COPYRIGHT AND LICENSE
 
-Copyright 2007-2011 by Makamaka Hannyaharamitu
+Copyright 2007-2014 by Makamaka Hannyaharamitu
 
 This library is free software; you can redistribute it and/or modify
 it under the same terms as Perl itself. 

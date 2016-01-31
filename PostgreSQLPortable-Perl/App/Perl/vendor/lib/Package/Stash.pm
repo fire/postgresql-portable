@@ -2,9 +2,7 @@ package Package::Stash;
 BEGIN {
   $Package::Stash::AUTHORITY = 'cpan:DOY';
 }
-{
-  $Package::Stash::VERSION = '0.34';
-}
+$Package::Stash::VERSION = '0.37';
 use strict;
 use warnings;
 use 5.008001;
@@ -19,62 +17,22 @@ BEGIN {
       if ( $IMPLEMENTATION and not $ENV{PACKAGE_STASH_IMPLEMENTATION} );
 
     Module::Implementation::build_loader_sub(
-        implementations => [ 'XS', 'PP' ]
+        implementations => [ 'XS', 'PP' ],
+        symbols         => [qw(
+            new
+            name
+            namespace
+            add_symbol
+            remove_glob
+            has_symbol
+            get_symbol
+            get_or_add_symbol
+            remove_symbol
+            list_all_symbols
+            get_all_symbols
+        )],
     )->();
     $IMPLEMENTATION = Module::Implementation::implementation_for(__PACKAGE__);
-
-    my $impl = "Package::Stash::$IMPLEMENTATION";
-    my $from = $impl->new($impl);
-    my $to = $impl->new(__PACKAGE__);
-    my $methods = $from->get_all_symbols('CODE');
-    for my $meth (keys %$methods) {
-        $to->add_symbol("&$meth" => $methods->{$meth});
-    }
-}
-
-use Package::DeprecationManager -deprecations => {
-    'Package::Stash::add_package_symbol'        => 0.14,
-    'Package::Stash::remove_package_glob'       => 0.14,
-    'Package::Stash::has_package_symbol'        => 0.14,
-    'Package::Stash::get_package_symbol'        => 0.14,
-    'Package::Stash::get_or_add_package_symbol' => 0.14,
-    'Package::Stash::remove_package_symbol'     => 0.14,
-    'Package::Stash::list_all_package_symbols'  => 0.14,
-};
-
-sub add_package_symbol {
-    deprecated('add_package_symbol is deprecated, please use add_symbol');
-    shift->add_symbol(@_);
-}
-
-sub remove_package_glob {
-    deprecated('remove_package_glob is deprecated, please use remove_glob');
-    shift->remove_glob(@_);
-}
-
-sub has_package_symbol {
-    deprecated('has_package_symbol is deprecated, please use has_symbol');
-    shift->has_symbol(@_);
-}
-
-sub get_package_symbol {
-    deprecated('get_package_symbol is deprecated, please use get_symbol');
-    shift->get_symbol(@_);
-}
-
-sub get_or_add_package_symbol {
-    deprecated('get_or_add_package_symbol is deprecated, please use get_or_add_symbol');
-    shift->get_or_add_symbol(@_);
-}
-
-sub remove_package_symbol {
-    deprecated('remove_package_symbol is deprecated, please use remove_symbol');
-    shift->remove_symbol(@_);
-}
-
-sub list_all_package_symbols {
-    deprecated('list_all_package_symbols is deprecated, please use list_all_symbols');
-    shift->list_all_symbols(@_);
 }
 
 
@@ -84,13 +42,15 @@ __END__
 
 =pod
 
+=encoding UTF-8
+
 =head1 NAME
 
 Package::Stash - routines for manipulating stashes
 
 =head1 VERSION
 
-version 0.34
+version 0.37
 
 =head1 SYNOPSIS
 
@@ -200,6 +160,55 @@ C<$type_filter> is passed, the hash will contain every variable of that type in
 the package as values, otherwise, it will contain the typeglobs corresponding
 to the variable names (basically, a clone of the stash).
 
+=head1 WORKING WITH VARIABLES
+
+It is important to note, that when working with scalar variables, the default
+behavior is to B<copy> values.
+
+  my $stash = Package::Stash->new('Some::Namespace');
+  my $variable = 1;
+  # $Some::Namespace::name is a copy of $variable
+  $stash->add_symbol('$name', $variable);
+  $variable++
+  # $Some::Namespace::name == 1 , $variable == 2
+
+This will likely confuse people who expect it to work the same as typeglob
+assignment, which simply creates new references to existing variables.
+
+  my $variable = 1;
+  {
+      no strict 'refs';
+      # assign $Package::Stash::name = $variable
+      *{'Package::Stash::name'} = \$variable;
+  }
+  $variable++ # affects both names
+
+If this behaviour is desired when working with Package::Stash, simply pass
+Package::Stash a scalar ref:
+
+  my $stash = Package::Stash->new('Some::Namespace');
+  my $variable = 1;
+  # $Some::Namespace::name is now $variable
+  $stash->add_symbol('$name', \$variable);
+  $variable++
+  # $Some::Namespace::name == 2 , $variable == 2
+
+This will be what you want as well if you're ever working with L<Readonly>
+variables:
+
+  use Readonly;
+  Readonly my $value, 'hello';
+
+  $stash->add_symbol('$name', \$value); # reference
+  print $Some::Namespace::name; # hello
+  # Tries to modify the read-only 'hello' and dies.
+  $Some::Namespace::name .= " world";
+
+  $stash->add_symbol('$name', $value); # copy
+  print $Some::Namespace::name; # hello
+  # No problem, modifying a copy, not the original
+  $Some::Namespace::name .= " world";
+
 =head1 BUGS / CAVEATS
 
 =over 4
@@ -215,9 +224,8 @@ L<perlref/Making References> point 7 for more information.
 
 =back
 
-Please report any bugs through RT: email
-C<bug-package-stash at rt.cpan.org>, or browse to
-L<http://rt.cpan.org/NoAuth/ReportBug.html?Queue=Package-Stash>.
+Please report any bugs to GitHub Issues at
+L<https://github.com/doy/package-stash/issues>.
 
 =head1 SEE ALSO
 
@@ -239,46 +247,36 @@ You can also look for information at:
 
 =over 4
 
-=item * AnnoCPAN: Annotated CPAN documentation
+=item * MetaCPAN
 
-L<http://annocpan.org/dist/Package-Stash>
+L<https://metacpan.org/release/Package-Stash>
 
-=item * CPAN Ratings
+=item * Github
 
-L<http://cpanratings.perl.org/d/Package-Stash>
+L<https://github.com/doy/package-stash>
 
 =item * RT: CPAN's request tracker
 
 L<http://rt.cpan.org/NoAuth/Bugs.html?Dist=Package-Stash>
 
-=item * Search CPAN
+=item * CPAN Ratings
 
-L<http://search.cpan.org/dist/Package-Stash>
+L<http://cpanratings.perl.org/d/Package-Stash>
 
 =back
 
-=head1 AUTHOR
-
-Jesse Luehrs <doy at tozt dot net>
+=head1 HISTORY
 
 Based on code from L<Class::MOP::Package>, by Stevan Little and the Moose
 Cabal.
 
-=for Pod::Coverage add_package_symbol
-remove_package_glob
-has_package_symbol
-get_package_symbol
-get_or_add_package_symbol
-remove_package_symbol
-list_all_package_symbols
-
 =head1 AUTHOR
 
-Jesse Luehrs <doy at tozt dot net>
+Jesse Luehrs <doy@tozt.net>
 
 =head1 COPYRIGHT AND LICENSE
 
-This software is copyright (c) 2013 by Jesse Luehrs.
+This software is copyright (c) 2014 by Jesse Luehrs.
 
 This is free software; you can redistribute it and/or modify it under
 the same terms as the Perl 5 programming language system itself.

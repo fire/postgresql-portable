@@ -1,11 +1,14 @@
-# $Id: Util.pm 35 2011-06-17 01:34:42Z stro $
+# $Id: Util.pm 53 2015-07-14 23:14:34Z stro $
 
 package CPAN::SQLite::Util;
 use strict;
 use warnings;
-our $VERSION = '0.202';
 
-use base qw(Exporter);
+our $VERSION = '0.211';
+
+use English qw/-no_match_vars/;
+
+use parent 'Exporter';
 our (@EXPORT_OK, %chaps, %modes,
      $table_id, $query_info, $mode_info, $full_id, $dslip);
 @EXPORT_OK = qw(%chaps $repositories %modes
@@ -206,7 +209,7 @@ sub vcmp {
 package CPAN::SQLite::Version;
 
 use strict;
-our $VERSION = 0.1;
+our $VERSION = '0.211';
 no warnings;
 
 # CPAN::Version::vcmp courtesy Jost Krieger
@@ -309,6 +312,10 @@ __END__
 =head1 NAME
 
 CPAN::SQLite::Util - export some common data structures used by CPAN::SQLite::*
+
+=head1 VERSION
+
+version 0.211
 
 =head1 DESCRIPTION
 

@@ -38,7 +38,7 @@ variable F77LIBS, e.g.
 
 =cut
 
-$VERSION = "1.17"; 
+$VERSION = "1.19"; 
 
 warn "\nExtUtils::F77: Version $VERSION\n";
 
@@ -122,7 +122,7 @@ $F77config{MinGW}{GFortran}{Link} = sub {
     } else {
         $dir = "/usr/local/lib";
     }    
-    return( "-L$dir -L/usr/lib -lgfortran -lm" );
+    return( "-L$dir -L/usr/lib -lgfortran -lquadmath -lm" );
 };
 
 $F77config{MinGW}{G77}{Trail_} = 1;
@@ -261,20 +261,12 @@ $F77config{Generic}{GNU}{Compiler} = find_in_path('g77', "$gfortran", 'g95','for
 $F77config{Generic}{DEFAULT}     = 'GNU';
 
 ### cygwin ###
-#"-lg2c -lm";
-# needed this on my cygwin system to get things working properly
-sub getcyglink {
-   return join ' ', map {my $lp = `g77 -print-file-name=lib$_.a`;
-			$lp =~ s|/[^/]+$||;
-			 $lp =~ s|L([a-z,A-Z]):|L//$1|g;
-			 "-L$lp -l$_"} qw/g2c m/;
-}
 
-$F77config{Cygwin}{G77}{Trail_} = 1;
-$F77config{Cygwin}{G77}{Compiler} = 'g77';
-$F77config{Cygwin}{G77}{Cflags} = '-O';
-$F77config{Cygwin}{G77}{Link}	= \&getcyglink;
-$F77config{Cygwin}{DEFAULT}	= 'G77';
+$F77config{Cygwin}{GNU}{Trail_} = 1;
+$F77config{Cygwin}{GNU}{Cflags} = '-O';        # <---need this space!
+$F77config{Cygwin}{GNU}{Link}   = link_gnufortran_compiler('g77', 'gfortran', 'g95', 'fort77');    
+$F77config{Cygwin}{GNU}{Compiler} = find_in_path('g77', "$gfortran", 'g95','fort77');
+$F77config{Cygwin}{DEFAULT}     = 'GNU';
 
 ### Linux ###
 
@@ -431,7 +423,12 @@ sub import {
            $Runtime = ' ' if $^O eq 'VMS';  # <-- need this space!
 	   print "Runtime: $Runtime\n";
            $ok = 1;
-     	   $ok = validate_libs($Runtime) if $flibs ne "";
+           if ($compiler eq 'GNU') { # Special gfortran case since it seems to have lots of random libs
+              print "Found compiler=$compiler - skipping validation of $Runtime \n";
+             
+     	    }else {  
+     	       $ok = validate_libs($Runtime) if $flibs ne "" ;
+     	   }
 	}
      }else {
      	$Runtime = $ok = "";
@@ -638,7 +635,7 @@ sub testcompiler {
 
 # gcclibs() routine
 #    Return gcc link libs (e.g. -L/usr/local/lib/gcc-lib/sparc-sun-sunos4.1.3_U1/2.7.0 -lgcc)
-#    Note this routine appears to be no longer requred - gcc3 or 4 change? - and is 
+#    Note this routine appears to be no longer required - gcc3 or 4 change? - and is 
 #    NO LONGER CALLED from anywhere in the code. Use of this routine in the future
 #    is DEPRECATED. Retain here just in case this logic is ever needed again,
 #    - Karl Glazebrook Dec/2010
@@ -727,10 +724,31 @@ sub link_gnufortran_compiler {
         $dir =~ s,/lib$lib.a$,,;
         last;
      } else {
+      # Try the same thing again but looking for the .so file
+      # rather than the .a file.
+      $dir = `$compiler -print-file-name=lib$test.so`;
+       chomp $dir;
+       if (defined $dir && $dir ne "lib$test.so") {
+        $lib = $test; # Found an existing library
+        $dir =~ s,/lib$lib.so$,,;
+        last;
+     } else {
          $dir = "/usr/local/lib";
          $lib = "f2c";
     }
     }
+    }
+    # Get compiler version number
+    my @t =`$compiler --version`; $t[0] =~ /(\d+).(\d)+.(\d+)/; 
+    my $version = "$1.$2";  # Major version number
+    print "ExtUtils::F77: $compiler version $version.$3\n";
+    # Sigh special case random extra gfortran libs to avoid PERL_DL_NONLAZY meltdowns. KG 25/10/2015
+    $append = "";
+    if ($compiler eq 'gfortran' && $version >= 4.9) { # Add extra libs for gfortran versions >= 4.9
+#    if ($compiler eq 'gfortran' && $Config{osname} =~ /darwin/ && $Config{osvers} >=14) { # code variant for OS X only
+       $append = "-lgcc_ext.10.5 -lgcc_s.10.5 -lquadmath";
+    }
+     return( "-L$dir $append -L/usr/lib -l$lib -lm" );
      return( "-L$dir -L/usr/lib -l$lib -lm" );
 }
 

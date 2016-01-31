@@ -1,33 +1,19 @@
 @rem = '--*-Perl-*--
 @echo off
 if "%OS%" == "Windows_NT" goto WinNT
-IF EXIST "%~dp0perl.exe" (
-"%~dp0perl.exe" -x -S "%0" %1 %2 %3 %4 %5 %6 %7 %8 %9
-) ELSE IF EXIST "%~dp0..\..\bin\perl.exe" (
-"%~dp0..\..\bin\perl.exe" -x -S "%0" %1 %2 %3 %4 %5 %6 %7 %8 %9
-) ELSE (
 perl -x -S "%0" %1 %2 %3 %4 %5 %6 %7 %8 %9
-)
-
 goto endofperl
 :WinNT
-IF EXIST "%~dp0perl.exe" (
-"%~dp0perl.exe" -x -S %0 %*
-) ELSE IF EXIST "%~dp0..\..\bin\perl.exe" (
-"%~dp0..\..\bin\perl.exe" -x -S %0 %*
-) ELSE (
 perl -x -S %0 %*
-)
-
 if NOT "%COMSPEC%" == "%SystemRoot%\system32\cmd.exe" goto endofperl
 if %errorlevel% == 9009 echo You do not have Perl in your PATH.
 if errorlevel 1 goto script_failed_so_exit_with_non_zero_val 2>nul
 goto endofperl
 @rem ';
 #!usr/bin/perl -w
-#line 29
+#line 15
 
-# $Id: cpandb 33 2011-06-13 04:17:28Z stro $
+# $Id: cpandb 45 2014-12-09 07:52:52Z stro $
 
 use strict;
 use warnings;
@@ -70,7 +56,7 @@ END
 }
 
 if (defined $setup and defined $reindex) {
-  die "Must reindex on an exisiting database";
+  die "Must reindex on an existing database";
 }
 
 if ($index) {
@@ -195,6 +181,10 @@ __END__
 
 cpandb - interface to C<CPAN::SQLite>
 
+=head1 VERSION
+
+version 0.211
+
 =head1 DESCRIPTION
 
 This script is an interface to the routines of
@@ -254,12 +244,12 @@ maintaining the database. These include
 =item * C<--setup>
 
 This specifies that the database is to be created and
-populated from the CPAN indices; any exisiting database
+populated from the CPAN indices; any existing database
 will be overwritten.
 
 =item * C<--update>
 
-This is used to update an exisiting database,
+This is used to update an existing database,
 which must have first been created with the C<setup>
 option.
 
@@ -299,7 +289,6 @@ case-insensitive manner.
 L<CPAN::SQLite>.
 
 =cut
-
 
 __END__
 :endofperl

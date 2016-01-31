@@ -3,7 +3,7 @@ use strict;
 use warnings;
 no warnings 'redefine';
 
-our $VERSION = do { my @r = ( q$Revision: 2.13 $ =~ /\d+/g ); sprintf "%d." . "%02d" x $#r, @r };
+our $VERSION = do { my @r = ( q$Revision: 2.17 $ =~ /\d+/g ); sprintf "%d." . "%02d" x $#r, @r };
 use Encode qw(find_encoding encode_utf8 decode_utf8);
 use MIME::Base64;
 use Carp;
@@ -31,7 +31,7 @@ $Encode::Encoding{'MIME-Q'} = bless {
     Name     => 'MIME-Q',
 } => __PACKAGE__;
 
-use base qw(Encode::Encoding);
+use parent qw(Encode::Encoding);
 
 sub needs_lines { 1 }
 sub perlio_ok   { 0 }
@@ -47,7 +47,7 @@ sub decode($$;$) {
     $str =~ s/(?:\r\n|[\r\n])[ \t]//gos;
 
     1 while ( $str =~
-        s/(=\?[-0-9A-Za-z_]+\?[Qq]\?)(.*?)\?=\1(.*?\?=)/$1$2$3/ )
+              s/(=\?[-0-9A-Za-z_]+\?[Qq]\?)([^?]*?)\?=\1([^?]*?\?=)/$1$2$3/ )
       ;    # Concat consecutive QP encoded mime headers
            # Fixes breaking inside multi-byte characters
 
@@ -135,11 +135,11 @@ sub encode($$;$) {
             $subline .= ' ' if ($subline =~ /\?=$/ and $word =~ /^=\?/);
             $subline .= $word;
         }
-        $subline and push @subline, $subline;
+        length($subline) and push @subline, $subline;
         push @line, join( "\n " => @subline );
     }
     $_[1] = '' if $chk;
-    return join( "\n", @line );
+    return (substr($str, 0, 0) . join( "\n", @line ));
 }
 
 use constant HEAD   => '=?UTF-8?';

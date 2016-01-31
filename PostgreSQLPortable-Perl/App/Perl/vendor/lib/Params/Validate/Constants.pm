@@ -1,10 +1,9 @@
 package Params::Validate::Constants;
-{
-  $Params::Validate::Constants::VERSION = '1.07';
-}
 
 use strict;
 use warnings;
+
+our $VERSION = '1.21';
 
 our @ISA = 'Exporter';
 

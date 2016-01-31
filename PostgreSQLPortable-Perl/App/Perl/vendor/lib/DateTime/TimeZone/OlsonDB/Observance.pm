@@ -1,8 +1,5 @@
 package DateTime::TimeZone::OlsonDB::Observance;
-{
-  $DateTime::TimeZone::OlsonDB::Observance::VERSION = '1.57';
-}
-
+$DateTime::TimeZone::OlsonDB::Observance::VERSION = '1.94';
 use strict;
 use warnings;
 
@@ -10,7 +7,7 @@ use DateTime::Duration;
 use DateTime::TimeZone::OlsonDB;
 use DateTime::TimeZone::OlsonDB::Change;
 
-use List::Util qw( first );
+use List::Util 1.33 qw( any first );
 use Params::Validate qw( validate SCALAR ARRAYREF UNDEF OBJECT );
 
 sub new {
@@ -28,7 +25,26 @@ sub new {
         }
     );
 
-    my $offset_from_utc = DateTime::TimeZone::offset_as_seconds( $p{gmtoff} );
+    my $offset_from_utc;
+
+    if ( $p{gmtoff} =~ /^([\+\-]?\d\d?)$/ ) {
+
+        # From the Olson database's etcetera file:
+        #
+        # We use POSIX-style signs in the Zone names and the output
+        # abbreviations, even though this is the opposite of what many people
+        # expect. POSIX has positive signs west of Greenwich, but many people
+        # expect positive signs east of Greenwich.  For example, TZ='Etc/GMT+4'
+        # uses the abbreviation "GMT+4" and corresponds to 4 hours behind UT
+        # (i.e. west of Greenwich) even though many people would expect it to
+        # mean 4 hours ahead of UT (i.e. east of Greenwich).
+        $offset_from_utc = 3600 * $1 * -1;
+    }
+    else {
+        $offset_from_utc
+            = DateTime::TimeZone::offset_as_seconds( $p{gmtoff} );
+    }
+
     my $offset_from_std
         = DateTime::TimeZone::offset_as_seconds( $p{offset_from_std} );
 
@@ -60,8 +76,8 @@ sub new {
     return $self;
 }
 
-sub offset_from_utc { $_[0]->{offset_from_utc} }
-sub offset_from_std { $_[0]->{offset_from_std} }
+sub offset_from_utc { $_[0]->{offset_from_utc} || 0 }
+sub offset_from_std { $_[0]->{offset_from_std} || 0 }
 sub total_offset    { $_[0]->offset_from_utc + $_[0]->offset_from_std }
 
 sub rules      { @{ $_[0]->{rules} } }
@@ -71,6 +87,16 @@ sub format { $_[0]->{format} }
 
 sub utc_start_datetime   { $_[0]->{utc_start_datetime} }
 sub local_start_datetime { $_[0]->{local_start_datetime} }
+
+sub formatted_short_name {
+    my $self   = shift;
+    my $letter = shift;
+
+    my $format = $self->format;
+    return $format unless $format =~ /%/;
+
+    return sprintf( $format, $letter );
+}
 
 sub expand_from_rules {
     my $self = shift;
@@ -116,7 +142,7 @@ sub expand_from_rules {
     foreach my $year ( $min_year .. $max_year ) {
         my @rules = $self->_sorted_rules_for_year($year);
 
-        foreach my $rule (@rules) {
+        for my $rule (@rules) {
             my $dt = $rule->utc_start_datetime_for_year( $year,
                 $self->offset_from_utc, $zone->last_change->offset_from_std );
 
@@ -134,7 +160,7 @@ sub expand_from_rules {
                 local_start_datetime => $dt + DateTime::Duration->new(
                     seconds => $self->total_offset + $rule->offset_from_std
                 ),
-                short_name => sprintf( $self->{format}, $rule->letter ),
+                short_name => $self->formatted_short_name( $rule->letter ),
                 observance => $self,
                 rule       => $rule,
             );
@@ -154,7 +180,7 @@ sub _sorted_rules_for_year {
     my $self = shift;
     my $year = shift;
 
-    return (
+    my @rules = (
         map      { $_->[0] }
             sort { $a->[1] <=> $b->[1] }
             map {
@@ -167,6 +193,51 @@ sub _sorted_rules_for_year {
                 && ( ( !$_->max_year ) || $_->max_year >= $year )
             } $self->rules
     );
+
+    my %rules_by_month;
+    for my $rule (@rules) {
+        push @{ $rules_by_month{ $rule->month() } }, $rule;
+    }
+
+    # For horrible cases like Morocco, we have both a "max year" rule and a
+    # "this year" rule for a given month's change. In that case, we want to
+    # pick the more specific ("this year") rule, not apply both.
+    my @final_rules;
+    for my $month ( sort { $a <=> $b } keys %rules_by_month ) {
+        my @r = @{ $rules_by_month{$month} };
+        if ( @r == 2 ) {
+            my ($repeating) = grep { !defined $_->max_year() } @r;
+            my ($this_year)
+                = grep { $_->max_year() && $_->max_year() == $year } @r;
+            if ( $repeating && $this_year ) {
+                if ( $year == 2037 ) {
+                    # This is what zic seems to do but I have no idea why
+                    if ($DateTime::TimeZone::OlsonDB::DEBUG) {
+                        print
+                            "Found two rules for the same month, picking the max year one because this year is 2037\n";
+                    }
+
+                    push @final_rules, $repeating;
+                }
+                else {
+                    if ($DateTime::TimeZone::OlsonDB::DEBUG) {
+                        print
+                            "Found two rules for the same month, picking the one for this year\n";
+                    }
+
+                    push @final_rules, $this_year;
+                }
+                next;
+            }
+
+            push @final_rules, @r;
+        }
+        else {
+            push @final_rules, @r;
+        }
+    }
+
+    return @final_rules;
 }
 
 sub until {

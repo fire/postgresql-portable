@@ -1,10 +1,9 @@
 package DateTime::Duration;
-{
-  $DateTime::Duration::VERSION = '0.78';
-}
 
 use strict;
 use warnings;
+
+our $VERSION = '1.21';
 
 use Carp ();
 use DateTime;
@@ -30,14 +29,14 @@ sub new {
     my $class = shift;
     my %p     = validate(
         @_, {
-            years        => { type => SCALAR, default => 0 },
-            months       => { type => SCALAR, default => 0 },
-            weeks        => { type => SCALAR, default => 0 },
-            days         => { type => SCALAR, default => 0 },
-            hours        => { type => SCALAR, default => 0 },
-            minutes      => { type => SCALAR, default => 0 },
-            seconds      => { type => SCALAR, default => 0 },
-            nanoseconds  => { type => SCALAR, default => 0 },
+            years       => { type => SCALAR, default => 0 },
+            months      => { type => SCALAR, default => 0 },
+            weeks       => { type => SCALAR, default => 0 },
+            days        => { type => SCALAR, default => 0 },
+            hours       => { type => SCALAR, default => 0 },
+            minutes     => { type => SCALAR, default => 0 },
+            seconds     => { type => SCALAR, default => 0 },
+            nanoseconds => { type => SCALAR, default => 0 },
             end_of_month => {
                 type  => SCALAR, default => undef,
                 regex => qr/^(?:wrap|limit|preserve)$/
@@ -68,7 +67,7 @@ sub new {
     $self->{end_of_month} = (
           defined $p{end_of_month} ? $p{end_of_month}
         : $self->{months} < 0      ? 'preserve'
-        : 'wrap'
+        :                            'wrap'
     );
 
     return $self;
@@ -260,8 +259,10 @@ sub compare {
 
     $dt ||= DateTime->now;
 
-    return DateTime->compare( $dt->clone->add_duration($dur1),
-        $dt->clone->add_duration($dur2) );
+    return DateTime->compare(
+        $dt->clone->add_duration($dur1),
+        $dt->clone->add_duration($dur2)
+    );
 }
 
 sub _add_overload {
@@ -318,7 +319,7 @@ DateTime::Duration - Duration objects for date math
 
 =head1 VERSION
 
-version 0.78
+version 1.21
 
 =head1 SYNOPSIS
 
@@ -602,7 +603,7 @@ Dave Rolsky <autarch@urth.org>
 
 =head1 COPYRIGHT AND LICENSE
 
-This software is Copyright (c) 2012 by Dave Rolsky.
+This software is Copyright (c) 2015 by Dave Rolsky.
 
 This is free software, licensed under:
 

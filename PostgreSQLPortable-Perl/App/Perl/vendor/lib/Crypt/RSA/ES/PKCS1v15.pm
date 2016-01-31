@@ -1,25 +1,23 @@
-#!/usr/bin/perl -sw
-##
+package Crypt::RSA::ES::PKCS1v15;
+use strict;
+use warnings;
+
 ## Crypt::RSA::ES::PKCS1v15
 ##
 ## Copyright (c) 2001, Vipul Ved Prakash.  All rights reserved.
 ## This code is free software; you can redistribute it and/or modify
 ## it under the same terms as Perl itself.
-##
-## $Id: PKCS1v15.pm,v 1.10 2001/06/22 23:27:37 vipul Exp $
 
-package Crypt::RSA::ES::PKCS1v15;
-use strict;
 use base 'Crypt::RSA::Errorhandler';
-use Crypt::Random          qw(makerandom_octet);
+use Bytes::Random::Secure  qw/random_bytes random_string_from/;
 use Crypt::RSA::DataFormat qw(bitsize octet_len os2ip i2osp);
 use Crypt::RSA::Primitives;
 use Crypt::RSA::Debug      qw(debug);
-use Math::Pari             qw(floor);
-use Sort::Versions         qw(versioncmp);
 use Carp;
 
 $Crypt::RSA::ES::PKCS1v15::VERSION = '1.99';
+
+my $nonzerobag = join('', map { chr($_) } (1..255));
 
 sub new { 
     my ($class, %params) = @_;
@@ -81,7 +79,15 @@ sub encode {
     my ($PS, $pslen) = ("", 0);
 
     $pslen = $emlen-$mlen-2;
-    $PS = makerandom_octet (Length => $pslen, Skip => chr(0));
+
+    #$PS = '';
+    #while (length($PS) < $pslen) {
+    #  $PS .= random_bytes( $pslen - length($PS) );
+    #  $PS =~ s/\x00//g;
+    #}
+
+    $PS = random_string_from($nonzerobag, $pslen);
+
     my $em = chr(2).$PS.chr(0).$M;
     return $em;
 }

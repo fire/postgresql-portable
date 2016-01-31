@@ -1,31 +1,17 @@
 @rem = '--*-Perl-*--
 @echo off
 if "%OS%" == "Windows_NT" goto WinNT
-IF EXIST "%~dp0perl.exe" (
-"%~dp0perl.exe" -x -S "%0" %1 %2 %3 %4 %5 %6 %7 %8 %9
-) ELSE IF EXIST "%~dp0..\..\bin\perl.exe" (
-"%~dp0..\..\bin\perl.exe" -x -S "%0" %1 %2 %3 %4 %5 %6 %7 %8 %9
-) ELSE (
 perl -x -S "%0" %1 %2 %3 %4 %5 %6 %7 %8 %9
-)
-
 goto endofperl
 :WinNT
-IF EXIST "%~dp0perl.exe" (
-"%~dp0perl.exe" -x -S %0 %*
-) ELSE IF EXIST "%~dp0..\..\bin\perl.exe" (
-"%~dp0..\..\bin\perl.exe" -x -S %0 %*
-) ELSE (
 perl -x -S %0 %*
-)
-
 if NOT "%COMSPEC%" == "%SystemRoot%\system32\cmd.exe" goto endofperl
 if %errorlevel% == 9009 echo You do not have Perl in your PATH.
 if errorlevel 1 goto script_failed_so_exit_with_non_zero_val 2>nul
 goto endofperl
 @rem ';
 #!/usr/bin/perl
-#line 29
+#line 15
 
 =head1 NAME
 
@@ -37,13 +23,13 @@ See L<Module::CoreList> for one.
 
 =head1 SYNOPSIS
 
-    corelist -v
-    corelist [-a|-d] <ModuleName> | /<ModuleRegex>/ [<ModuleVersion>] ...
-    corelist [-v <PerlVersion>] [ <ModuleName> | /<ModuleRegex>/ ] ...
-    corelist [-r <PerlVersion>] ...
-    corelist --feature <FeatureName> [<FeatureName>] ...
-    corelist --diff PerlVersion PerlVersion
-    corelist --upstream <ModuleName>
+   corelist -v
+   corelist [-a|-d] <ModuleName> | /<ModuleRegex>/ [<ModuleVersion>] ...
+   corelist [-v <PerlVersion>] [ <ModuleName> | /<ModuleRegex>/ ] ...
+   corelist [-r <PerlVersion>] ...
+   corelist --feature <FeatureName> [<FeatureName>] ...
+   corelist --diff PerlVersion PerlVersion
+   corelist --upstream <ModuleName>
 
 =head1 OPTIONS
 
@@ -158,7 +144,7 @@ requested perl versions.
 =cut
 
 use Module::CoreList;
-use Getopt::Long;
+use Getopt::Long qw(:config no_ignore_case);
 use Pod::Usage;
 use strict;
 use warnings;
@@ -179,7 +165,7 @@ if(exists $Opts{r} ){
         print "\nModule::CoreList has release info for the following perl versions:\n";
         my $versions = { };
         my $max_ver_len = max_mod_len(\%Module::CoreList::released);
-        for my $ver ( sort keys %Module::CoreList::released ) {
+        for my $ver ( grep !/0[01]0$/, sort keys %Module::CoreList::released ) {
           printf "%-${max_ver_len}s    %s\n", format_perl_version($ver), $Module::CoreList::released{$ver};
         }
         print "\n";
@@ -201,7 +187,7 @@ if(exists $Opts{r} ){
 if(exists $Opts{v} ){
     if( !$Opts{v} ) {
         print "\nModule::CoreList has info on the following perl versions:\n";
-        print format_perl_version($_)."\n" for sort keys %Module::CoreList::version;
+        print format_perl_version($_)."\n" for grep !/0[01]0$/, sort keys %Module::CoreList::version;
         print "\n";
         exit 0;
     }
@@ -254,8 +240,8 @@ if ($Opts{diff}) {
 }
 
 if ($Opts{feature}) {
-    die "\n--feature is only available with perl v5.9.5 or greater\n"
-      if $] < 5.009005;
+    die "\n--feature is only available with perl v5.16.0 or greater\n"
+      if $] < 5.016;
 
     die "\nprovide at least one feature name to --feature\n"
         unless @ARGV;
@@ -410,7 +396,7 @@ sub max {
 sub display_a {
     my $mod = shift;
 
-    for my $v (grep !/000$/, sort keys %Module::CoreList::version ) {
+    for my $v (grep !/0[01]0$/, sort keys %Module::CoreList::version ) {
         next unless exists $Module::CoreList::version{$v}{$mod};
 
         my $mod_v = $Module::CoreList::version{$v}{$mod} || 'undef';

@@ -1,22 +1,41 @@
 package Method::Generate::Constructor;
 
-use strictures 1;
-use Sub::Quote;
-use base qw(Moo::Object);
+use Moo::_strictures;
+use Sub::Quote qw(quote_sub unquote_sub quotify);
 use Sub::Defer;
-use B 'perlstring';
+use Moo::_Utils qw(_getstash _getglob);
+use Moo;
 
 sub register_attribute_specs {
   my ($self, @new_specs) = @_;
+  $self->assert_constructor;
   my $specs = $self->{attribute_specs}||={};
   while (my ($name, $new_spec) = splice @new_specs, 0, 2) {
     if ($name =~ s/^\+//) {
       die "has '+${name}' given but no ${name} attribute already exists"
         unless my $old_spec = $specs->{$name};
       foreach my $key (keys %$old_spec) {
-        $new_spec->{$key} = $old_spec->{$key}
-          unless exists $new_spec->{$key};
+        if (!exists $new_spec->{$key}) {
+          $new_spec->{$key} = $old_spec->{$key}
+            unless $key eq 'handles';
+        }
+        elsif ($key eq 'moosify') {
+          $new_spec->{$key} = [
+            map { ref $_ eq 'ARRAY' ? @$_ : $_ }
+              ($old_spec->{$key}, $new_spec->{$key})
+          ];
+        }
       }
+    }
+    if ($new_spec->{required}
+      && !(
+        $self->accessor_generator->has_default($name, $new_spec)
+        || !exists $new_spec->{init_arg}
+        || defined $new_spec->{init_arg}
+      )
+    ) {
+      die "You cannot have a required attribute (${name})"
+        . " without a default, builder, or an init_arg";
     }
     $new_spec->{index} = scalar keys %$specs
       unless defined $new_spec->{index};
@@ -36,20 +55,68 @@ sub accessor_generator {
 sub construction_string {
   my ($self) = @_;
   $self->{construction_string}
-    or 'bless('
-       .$self->accessor_generator->default_construction_string
-       .', $class);'
+    ||= $self->_build_construction_string;
+}
+
+sub buildall_generator {
+  require Method::Generate::BuildAll;
+  Method::Generate::BuildAll->new;
+}
+
+sub _build_construction_string {
+  my ($self) = @_;
+  my $builder = $self->{construction_builder};
+  $builder ? $self->$builder
+    : 'bless('
+    .$self->accessor_generator->default_construction_string
+    .', $class);'
 }
 
 sub install_delayed {
   my ($self) = @_;
+  $self->assert_constructor;
   my $package = $self->{package};
-  defer_sub "${package}::new" => sub {
+  my (undef, @isa) = @{mro::get_linear_isa($package)};
+  my $isa = join ',', @isa;
+  $self->{deferred_constructor} = defer_sub "${package}::new" => sub {
+    my (undef, @new_isa) = @{mro::get_linear_isa($package)};
+    if (join(',', @new_isa) ne $isa) {
+      my ($expected_new) = grep { *{_getglob($_.'::new')}{CODE} } @isa;
+      my ($found_new) = grep { *{_getglob($_.'::new')}{CODE} } @new_isa;
+      if (($found_new||'') ne ($expected_new||'')) {
+        $found_new ||= 'none';
+        $expected_new ||= 'none';
+        die "Expected parent constructor of $package expected to be"
+        . " $expected_new, but found $found_new: changing the inheritance"
+        . " chain (\@ISA) at runtime is unsupported";
+      }
+    }
     unquote_sub $self->generate_method(
       $package, 'new', $self->{attribute_specs}, { no_install => 1 }
     )
   };
   $self;
+}
+
+sub current_constructor {
+  my ($self, $package) = @_;
+  return *{_getglob("${package}::new")}{CODE};
+}
+
+sub assert_constructor {
+  my ($self) = @_;
+  my $package = $self->{package} or return 1;
+  my $current = $self->current_constructor($package)
+    or return 1;
+  my $deferred = $self->{deferred_constructor}
+    or die "Unknown constructor for $package already exists";
+  return 1
+    if $deferred == $current;
+  my $current_deferred = (Sub::Defer::defer_info($current)||[])->[3];
+  if ($current_deferred && $current_deferred == $deferred) {
+    die "Constructor for $package has been inlined and cannot be updated";
+  }
+  die "Constructor for $package has been replaced with an unknown sub";
 }
 
 sub generate_method {
@@ -71,8 +138,7 @@ sub generate_method {
   $body .= '    my $new = '.$self->construction_string.";\n";
   $body .= $self->_assign_new($spec);
   if ($into->can('BUILD')) {
-    require Method::Generate::BuildAll;
-    $body .= Method::Generate::BuildAll->new->buildall_body_for(
+    $body .= $self->buildall_generator->buildall_body_for(
       $into, '$new', '$args'
     );
   }
@@ -90,7 +156,7 @@ sub generate_method {
 sub _handle_subconstructor {
   my ($self, $into, $name) = @_;
   if (my $gen = $self->{subconstructor_handler}) {
-    '    if ($class ne '.perlstring($into).') {'."\n".
+    '    if ($class ne '.quotify($into).') {'."\n".
     $gen.
     '    }'."\n";
   } else {
@@ -124,8 +190,8 @@ sub _generate_args {
         $args = { %{ $_[0] } };
     }
     elsif ( @_ % 2 ) {
-        die "The new() method for $class expects a hash reference or a key/value list."
-                . " You passed an odd number of arguments\n";
+        die "The new() method for $class expects a hash reference or a"
+          . " key/value list. You passed an odd number of arguments\n";
     }
     else {
         $args = {@_};
@@ -145,7 +211,7 @@ sub _assign_new {
     $test{$name} = $attr_spec->{init_arg};
   }
   join '', map {
-    my $arg_key = perlstring($test{$_});
+    my $arg_key = quotify($test{$_});
     my $test = "exists \$args->{$arg_key}";
     my $source = "\$args->{$arg_key}";
     my $attr_spec = $spec->{$_};
@@ -161,13 +227,32 @@ sub _check_required {
     map $spec->{$_}{init_arg},
       grep {
         my %s = %{$spec->{$_}}; # ignore required if default or builder set
-        $s{required} and not($s{builder} or $s{default})
+        $s{required} and not($s{builder} or exists $s{default})
       } sort keys %$spec;
   return '' unless @required_init;
-  '    if (my @missing = grep !exists $args->{$_}, qw('
-    .join(' ',@required_init).')) {'."\n"
+  '    if (my @missing = grep !exists $args->{$_}, '
+    .join(', ', map quotify($_), @required_init).') {'."\n"
     .q{      die "Missing required arguments: ".join(', ', sort @missing);}."\n"
     ."    }\n";
 }
+
+# bootstrap our own constructor
+sub new {
+  my $class = shift;
+  delete _getstash(__PACKAGE__)->{new};
+  bless $class->BUILDARGS(@_), $class;
+}
+Moo->_constructor_maker_for(__PACKAGE__)
+->register_attribute_specs(
+  attribute_specs => {
+    is => 'ro',
+    reader => 'all_attribute_specs',
+  },
+  accessor_generator => { is => 'ro' },
+  construction_string => { is => 'lazy' },
+  construction_builder => { is => 'bare' },
+  subconstructor_handler => { is => 'ro' },
+  package => { is => 'bare' },
+);
 
 1;

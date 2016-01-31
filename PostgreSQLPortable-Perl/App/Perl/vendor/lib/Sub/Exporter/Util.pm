@@ -2,7 +2,7 @@ use strict;
 use warnings;
 package Sub::Exporter::Util;
 {
-  $Sub::Exporter::Util::VERSION = '0.985';
+  $Sub::Exporter::Util::VERSION = '0.987';
 }
 # ABSTRACT: utilities to make Sub::Exporter easier
 
@@ -218,13 +218,13 @@ Sub::Exporter::Util - utilities to make Sub::Exporter easier
 
 =head1 VERSION
 
-version 0.985
+version 0.987
 
 =head1 DESCRIPTION
 
 This module provides a number of utility functions for performing common or
 useful operations when setting up a Sub::Exporter configuration.  All of the
-utilites may be exported, but none are by default.
+utilities may be exported, but none are by default.
 
 =head1 THE UTILITIES
 
@@ -301,7 +301,7 @@ the generated routine's stack.
 
 This utility wraps the given generator in one that will merge the named
 collection into its args before calling it.  This means that you can support a
-"default" collector in multipe exports without writing the code each time.
+"default" collector in multiple exports without writing the code each time.
 
 You can specify as many pairs of collection names and generators as you like.
 

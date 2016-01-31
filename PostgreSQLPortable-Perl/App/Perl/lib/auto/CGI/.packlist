@@ -1,9 +1,11 @@
 C:\strawberry\perl\lib\CGI.pm
-C:\strawberry\perl\lib\CGI\Apache.pm
+C:\strawberry\perl\lib\CGI.pod
 C:\strawberry\perl\lib\CGI\Carp.pm
 C:\strawberry\perl\lib\CGI\Cookie.pm
-C:\strawberry\perl\lib\CGI\Fast.pm
+C:\strawberry\perl\lib\CGI\File\Temp.pm
+C:\strawberry\perl\lib\CGI\HTML\Functions.pm
+C:\strawberry\perl\lib\CGI\HTML\Functions.pod
 C:\strawberry\perl\lib\CGI\Pretty.pm
 C:\strawberry\perl\lib\CGI\Push.pm
-C:\strawberry\perl\lib\CGI\Switch.pm
 C:\strawberry\perl\lib\CGI\Util.pm
+C:\strawberry\perl\lib\Fh.pm

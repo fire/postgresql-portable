@@ -1,14 +1,14 @@
 package DateTime::TimeZone::Local::Win32;
-{
-  $DateTime::TimeZone::Local::Win32::VERSION = '1.57';
-}
+$DateTime::TimeZone::Local::Win32::VERSION = '1.86';
+use 5.006;
 
 use strict;
 use warnings;
 
-use parent 'DateTime::TimeZone::Local';
+use Try::Tiny;
+use Win32::TieRegistry 0.27 ( 'KEY_READ', Delimiter => q{/} );
 
-use Win32::TieRegistry ( 'KEY_READ', Delimiter => q{/} );
+use parent 'DateTime::TimeZone::Local';
 
 sub Methods { return qw( FromEnv FromRegistry ) }
 
@@ -17,7 +17,7 @@ sub EnvVars { return 'TZ' }
 {
     # This list comes (mostly) in the zipball for the Chronos project
     # - a Smalltalk datetime library. Thanks, Chronos!
-    my %WinToOlson = (
+    my %WinToIANA = (
         'Afghanistan'                     => 'Asia/Kabul',
         'Afghanistan Standard Time'       => 'Asia/Kabul',
         'Alaskan'                         => 'America/Anchorage',
@@ -43,6 +43,7 @@ sub EnvVars { return 'TZ' }
         'Bangkok Standard Time'           => 'Asia/Bangkok',
         'Bangladesh Standard Time'        => 'Asia/Dhaka',
         'Beijing'                         => 'Asia/Shanghai',
+        'Belarus Standard Time'           => 'Europe/Minsk',
         'Canada Central'                  => 'America/Regina',
         'Canada Central Standard Time'    => 'America/Regina',
         'Cape Verde Standard Time'        => 'Atlantic/Cape_Verde',
@@ -71,12 +72,13 @@ sub EnvVars { return 'TZ' }
         'E. Africa Standard Time'         => 'Africa/Nairobi',
         'E. Australia'                    => 'Australia/Brisbane',
         'E. Australia Standard Time'      => 'Australia/Brisbane',
-        'E. Europe'                       => 'Europe/Minsk',
-        'E. Europe Standard Time'         => 'Europe/Minsk',
+        'E. Europe'                       => 'Europe/Helsinki',
+        'E. Europe Standard Time'         => 'Europe/Helsinki',
         'E. South America'                => 'America/Sao_Paulo',
         'E. South America Standard Time'  => 'America/Sao_Paulo',
         'Eastern'                         => 'America/New_York',
         'Eastern Standard Time'           => 'America/New_York',
+        'Eastern Standard Time (Mexico)'  => 'America/Cancun',
         'Egypt'                           => 'Africa/Cairo',
         'Egypt Standard Time'             => 'Africa/Cairo',
         'Ekaterinburg'                    => 'Asia/Yekaterinburg',
@@ -108,6 +110,8 @@ sub EnvVars { return 'TZ' }
         'Kamchatka Standard Time'         => 'Asia/Kamchatka',
         'Korea'                           => 'Asia/Seoul',
         'Korea Standard Time'             => 'Asia/Seoul',
+        'Libya Standard Time'             => 'Africa/Tripoli',
+        'Line Islands Standard Time'      => 'Pacific/Kiritimati',
         'Magadan Standard Time'           => 'Asia/Magadan',
         'Mauritius Standard Time'         => 'Indian/Mauritius',
         'Mexico'                          => 'America/Mexico_City',
@@ -131,6 +135,7 @@ sub EnvVars { return 'TZ' }
         'Newfoundland Standard Time'      => 'America/St_Johns',
         'North Asia East Standard Time'   => 'Asia/Irkutsk',
         'North Asia Standard Time'        => 'Asia/Krasnoyarsk',
+        'North Korea Standard Time'       => 'Asia/Pyongyang',
         'Pacific'                         => 'America/Los_Angeles',
         'Pacific SA'                      => 'America/Santiago',
         'Pacific SA Standard Time'        => 'America/Santiago',
@@ -141,6 +146,9 @@ sub EnvVars { return 'TZ' }
         'Prague Bratislava'               => 'Europe/Prague',
         'Romance'                         => 'Europe/Paris',
         'Romance Standard Time'           => 'Europe/Paris',
+        'Russia Time Zone 10'             => 'Asia/Srednekolymsk',
+        'Russia Time Zone 11'             => 'Asia/Anadyr',
+        'Russia Time Zone 3'              => 'Europe/Samara',
         'Russian'                         => 'Europe/Moscow',
         'Russian Standard Time'           => 'Europe/Moscow',
         'SA Eastern'                      => 'America/Cayenne',
@@ -197,6 +205,14 @@ sub EnvVars { return 'TZ' }
         'Yakutsk'                         => 'Asia/Yakutsk',
         'Yakutsk Standard Time'           => 'Asia/Yakutsk',
     );
+    
+    sub _WindowsToIANA {
+        my $class = shift;
+        
+        my $win_name = shift;
+
+        return $WinToIANA{$win_name};
+    }
 
     sub FromRegistry {
         my $class = shift;
@@ -205,20 +221,21 @@ sub EnvVars { return 'TZ' }
 
         # On Windows 2008 Server, there is additional junk after a
         # null character.
-        $win_name =~ s/\0.*$//
+        $win_name =~ s/\0.*$//s
             if defined $win_name;
 
         return unless defined $win_name;
 
-        my $olson = $WinToOlson{$win_name};
+        my $iana = $class->_WindowsToIANA($win_name);
 
-        return unless $olson;
+        return unless $iana;
 
-        return unless $class->_IsValidName($olson);
+        return unless $class->_IsValidName($iana);
 
-        local $@;
-        local $SIG{__DIE__};
-        return eval { DateTime::TimeZone->new( name => $olson ) };
+        return try {
+            local $SIG{__DIE__};
+            DateTime::TimeZone->new( name => $iana );
+        };
     }
 }
 
@@ -266,13 +283,15 @@ __END__
 
 =pod
 
+=encoding UTF-8
+
 =head1 NAME
 
 DateTime::TimeZone::Local::Win32 - Determine the local system's time zone on Windows
 
 =head1 VERSION
 
-version 1.57
+version 1.86
 
 =head1 SYNOPSIS
 
@@ -284,6 +303,10 @@ version 1.57
 
 This module provides methods for determining the local time zone on a
 Windows platform.
+
+=head1 NAME
+
+DateTime::TimeZone::Local::Win32 - Determine the local system's time zone on Windows
 
 =head1 HOW THE TIME ZONE IS DETERMINED
 
@@ -299,7 +322,7 @@ It checks C<< $ENV{TZ} >> for a valid time zone name.
 =item * Windows Registry
 
 When using the registry, we look for the Windows time zone and use a
-mapping to translate this to an Olson time zone name.
+mapping to translate this to an IANA time zone name.
 
 =over 8
 
@@ -307,7 +330,7 @@ mapping to translate this to an Olson time zone name.
 
 We look in "SYSTEM/CurrentControlSet/Control/TimeZoneInformation/" for
 a node named "/TimeZoneKeyName". If this exists, we use this key to
-look up the Olson time zone name in our mapping.
+look up the IANA time zone name in our mapping.
 
 =item * Windows NT, Windows 2000, Windows XP, Windows 2003 Server
 
@@ -318,7 +341,7 @@ For each sub key, we compare the value of the key with "/Std" appended
 to the end to the value of
 "SYSTEM/CurrentControlSet/Control/TimeZoneInformation/StandardName". This
 gives us the I<English> name of the Windows time zone, which we use to
-look up the Olson time zone name.
+look up the IANA time zone name.
 
 =item * Windows 95, Windows 98, Windows Millenium Edition
 
@@ -329,13 +352,24 @@ of "SOFTWARE/Microsoft/Windows/CurrentVersion/Time Zones/"
 
 =back
 
-=head1 AUTHOR
+=head1 AUTHORS
+
+=over 4
+
+=item *
+
+David Pinkowitz <dapink@cpan.org>
+
+=item *
 
 Dave Rolsky <autarch@urth.org>
 
+=back
+
 =head1 COPYRIGHT AND LICENSE
 
-This software is copyright (c) 2013 by Dave Rolsky.
+Copyright (C) 2007-2014 Dave Rolsky <autarch@urth.org>
+Copyright (C) 2014-2015 by David Pinkowitz <dapink@cpan.org>
 
 This is free software; you can redistribute it and/or modify it under
 the same terms as the Perl 5 programming language system itself.

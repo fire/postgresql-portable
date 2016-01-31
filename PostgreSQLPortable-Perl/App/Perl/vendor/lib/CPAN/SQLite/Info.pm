@@ -1,8 +1,13 @@
-# $Id: Info.pm 35 2011-06-17 01:34:42Z stro $
+# $Id: Info.pm 53 2015-07-14 23:14:34Z stro $
 
 package CPAN::SQLite::Info;
 use strict;
 use warnings;
+
+our $VERSION = '0.211';
+
+use English qw/-no_match_vars/;
+
 use CPAN::DistnameInfo;
 use File::Spec::Functions qw(catfile);
 use Compress::Zlib;
@@ -10,13 +15,11 @@ use File::Basename;
 use Safe;
 use CPAN::SQLite::Util qw(vcmp print_debug);
 
-our $VERSION = '0.202';
-
 my $ext = qr/\.(tar\.gz|tar\.Z|tgz|zip)$/;
 
 sub new {
   my ($class, %args) = @_;
-  my $self = {dists => {}, auths => {}, mods => {}, %args};
+  my $self = {dists => {}, auths => {}, mods => {}, info => {}, %args};
   return bless $self, $class;
 }
 
@@ -61,8 +64,7 @@ sub dists_and_mods {
       print_debug("Ignoring $dist_name\n");
       next;
     }
-    if (not $dists->{$dist_name} or 
-        vcmp($dist_vers, $dists->{$dist_name}->{dist_vers}) > 0) {
+    if (not $dists->{$dist_name} or vcmp($dist_vers, $dists->{$dist_name}->{dist_vers}) > 0) {
       $dists->{$dist_name}->{dist_vers} = $dist_vers;
       $dists->{$dist_name}->{dist_file} = $dist_file;
       $dists->{$dist_name}->{cpanid} = $cpanid;
@@ -81,7 +83,7 @@ sub dists_and_mods {
       next;
     }
     $mods->{$mod_name}->{dist_name} = $dist_name;
-    $dists->{$dist_name}->{modules}->{$mod_name}++; 
+    $dists->{$dist_name}->{modules}->{$mod_name}++;
     $mods->{$mod_name}->{mod_vers} = $packages->{$mod_name}->{mod_vers};
     if (my $info = $modlist->{$mod_name}) {
       if (my $mod_abs = $info->{description}) {
@@ -209,7 +211,7 @@ sub check_file {
   }
   return 1;
 }
-    
+
 sub zcat {
   my $file = shift;
   my ($buffer, $lines);
@@ -235,11 +237,13 @@ sub trim {
 
 1;
 
-__END__
-
 =head1 NAME
 
 CPAN::SQLite::Info - extract information from CPAN indices
+
+=head1 VERSION
+
+version 0.211
 
 =head1 DESCRIPTION
 
@@ -265,7 +269,7 @@ will result in the object being populated with 3 hash references:
 
 This contains information on distributions. Keys of this hash
 reference are the distribution names, with the associated value being a
-hash reference with keys of 
+hash reference with keys of
 
 =over 3
 
@@ -283,7 +287,7 @@ hash reference with keys of
     print "Module: $module\n";
   }
 
-=item C<chapterid> - specifies the chapterid and the subchapter 
+=item C<chapterid> - specifies the chapterid and the subchapter
 for the distribution:
 
   for my $id (keys %{$info->{$distname}->{chapterid}}) {
@@ -311,7 +315,7 @@ hash reference with keys of
 
 =item C<chapterid> - the chapter id of the module, if present
 
-=item C<dslip> - a 5 character string specifying the dslip 
+=item C<dslip> - a 5 character string specifying the dslip
 (development, support, language, interface, public licence) information.
 
 =back
@@ -320,7 +324,7 @@ hash reference with keys of
 
 This contains information on CPAN authors. Keys of this hash
 reference are the CPAN ids, with the associated value being a
-hash reference with keys of 
+hash reference with keys of
 
 =over 3
 
@@ -337,4 +341,3 @@ hash reference with keys of
 L<CPAN::SQLite::Index>
 
 =cut
-

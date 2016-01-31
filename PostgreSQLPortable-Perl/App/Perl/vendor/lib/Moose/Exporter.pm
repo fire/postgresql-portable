@@ -1,10 +1,5 @@
 package Moose::Exporter;
-BEGIN {
-  $Moose::Exporter::AUTHORITY = 'cpan:STEVAN';
-}
-{
-  $Moose::Exporter::VERSION = '2.0604';
-}
+our $VERSION = '2.1604';
 
 use strict;
 use warnings;
@@ -13,9 +8,11 @@ use Class::Load qw(is_class_loaded);
 use Class::MOP;
 use List::MoreUtils qw( first_index uniq );
 use Moose::Util::MetaRole;
-use Scalar::Util qw(reftype);
+use Scalar::Util 1.11 qw(reftype);
 use Sub::Exporter 0.980;
 use Sub::Name qw(subname);
+
+use Moose::Util 'throw_exception';
 
 my %EXPORT_SPEC;
 
@@ -87,10 +84,16 @@ sub build_import_methods {
     my $package = Class::MOP::Package->initialize($exporting_package);
     for my $to_install ( @{ $args{install} || [] } ) {
         my $symbol = '&' . $to_install;
+
         next
             unless $methods{$to_install}
                 && !$package->has_package_symbol($symbol);
-        $package->add_package_symbol( $symbol, $methods{$to_install} );
+        $package->add_package_symbol(
+            $symbol,
+            subname(
+                $exporting_package . '::' . $to_install, $methods{$to_install}
+            )
+        );
     }
 
     return ( $methods{import}, $methods{unimport}, $methods{init_meta} );
@@ -139,44 +142,68 @@ sub _make_exporter {
     );
 }
 
-{
-    our %_seen;
+sub _follow_also {
+    my $class             = shift;
+    my $exporting_package = shift;
 
-    sub _follow_also {
-        my $class             = shift;
-        my $exporting_package = shift;
+    _die_if_cycle_found_in_also_list_for_package($exporting_package);
 
-        local %_seen = ( $exporting_package => 1 );
+    return uniq( _follow_also_real($exporting_package) );
+}
 
-        return uniq( _follow_also_real($exporting_package) );
+sub _follow_also_real {
+    my $exporting_package = shift;
+    my @also              = _also_list_for_package($exporting_package);
+
+    return map { $_, _follow_also_real($_) } @also;
+}
+
+sub _also_list_for_package {
+    my $package = shift;
+
+    if ( !exists $EXPORT_SPEC{$package} ) {
+        my $loaded = is_class_loaded($package);
+
+        throw_exception( PackageDoesNotUseMooseExporter => package   => $package,
+                                                           is_loaded => $loaded
+                       );
     }
 
-    sub _follow_also_real {
-        my $exporting_package = shift;
+    my $also = $EXPORT_SPEC{$package}{also};
 
-        if ( !exists $EXPORT_SPEC{$exporting_package} ) {
-            my $loaded = is_class_loaded($exporting_package);
+    return unless defined $also;
 
-            die "Package in also ($exporting_package) does not seem to "
-                . "use Moose::Exporter"
-                . ( $loaded ? "" : " (is it loaded?)" );
+    return ref $also ? @$also : $also;
+}
+
+# this is no Tarjan algorithm, but for the list sizes expected,
+# brute force will probably be fine (and more maintainable)
+sub _die_if_cycle_found_in_also_list_for_package {
+    my $package = shift;
+    _die_if_also_list_cycles_back_to_existing_stack(
+        [ _also_list_for_package($package) ],
+        [$package],
+    );
+}
+
+sub _die_if_also_list_cycles_back_to_existing_stack {
+    my ( $also_list, $existing_stack ) = @_;
+
+    return unless @$also_list && @$existing_stack;
+
+    for my $also_member (@$also_list) {
+        for my $stack_member (@$existing_stack) {
+            next unless $also_member eq $stack_member;
+
+            throw_exception( CircularReferenceInAlso => also_parameter => $also_member,
+                                                        stack          => $existing_stack
+                           );
         }
 
-        my $also = $EXPORT_SPEC{$exporting_package}{also};
-
-        return unless defined $also;
-
-        my @also = ref $also ? @{$also} : $also;
-
-        for my $package (@also) {
-            die
-                "Circular reference in 'also' parameter to Moose::Exporter between $exporting_package and $package"
-                if $_seen{$package};
-
-            $_seen{$package} = 1;
-        }
-
-        return map { $_, _follow_also_real($_) } @also;
+        _die_if_also_list_cycles_back_to_existing_stack(
+            [ _also_list_for_package($also_member) ],
+            [ $also_member, @$existing_stack ],
+        );
     }
 }
 
@@ -189,10 +216,10 @@ sub _parse_trait_aliases {
         my $name;
         if (ref($alias)) {
             reftype($alias) eq 'ARRAY'
-                or Moose->throw_error(reftype($alias) . " references are not "
-                                    . "valid arguments to the 'trait_aliases' "
-                                    . "option");
-
+                or throw_exception( InvalidArgumentsToTraitAliases => class_name   => $class,
+                                                                      package_name => $package,
+                                                                      alias        => $alias
+                                  );
             ($alias, $name) = @$alias;
         }
         else {
@@ -265,6 +292,16 @@ sub _make_sub_exporter_params {
                     = Class::MOP::get_code_info($name);
 
                 if ( $coderef_pkg ne $package ) {
+                    $is_reexport->{$coderef_name} = 1;
+                }
+            }
+            elsif ( $name =~ /^(.*)::([^:]+)$/ ) {
+                $sub = $class->_sub_from_package( "$1", "$2" )
+                    or next;
+
+                $coderef_name = "$2";
+
+                if ( $1 ne $package ) {
                     $is_reexport->{$coderef_name} = 1;
                 }
             }
@@ -473,10 +510,9 @@ sub _make_import_sub {
             _apply_meta_traits( $CALLER, $traits, $meta_lookup );
         }
         elsif ( @{$traits} ) {
-            require Moose;
-            Moose->throw_error(
-                "Cannot provide traits when $class does not have an init_meta() method"
-            );
+            throw_exception( ClassDoesNotHaveInitMeta => class_name => $class,
+                                                         traits     => $traits
+                           );
         }
 
         my ( undef, @args ) = @_;
@@ -621,10 +657,11 @@ sub _apply_meta_traits {
 
     my $meta = $meta_lookup->($class);
 
-    my $type = ( split /::/, ref $meta )[-1]
-        or Moose->throw_error(
-        'Cannot determine metaclass type for trait application . Meta isa '
-            . ref $meta );
+    my $type = $meta->isa('Moose::Meta::Role') ? 'Role'
+             : $meta->isa('Class::MOP::Class') ? 'Class'
+             : confess('Cannot determine metaclass type for '
+                           . 'trait application. Meta isa '
+                           . ref $meta);
 
     my @resolved_traits = map {
         ref $_
@@ -759,9 +796,11 @@ sub import {
 
 # ABSTRACT: make an import() and unimport() just like Moose.pm
 
-
+__END__
 
 =pod
+
+=encoding UTF-8
 
 =head1 NAME
 
@@ -769,7 +808,7 @@ Moose::Exporter - make an import() and unimport() just like Moose.pm
 
 =head1 VERSION
 
-version 2.0604
+version 2.1604
 
 =head1 SYNOPSIS
 
@@ -777,10 +816,11 @@ version 2.0604
 
   use Moose ();
   use Moose::Exporter;
+  use Some::Random ();
 
   Moose::Exporter->setup_import_methods(
       with_meta => [ 'has_rw', 'sugar2' ],
-      as_is     => [ 'sugar3', \&Some::Random::thing ],
+      as_is     => [ 'sugar3', \&Some::Random::thing, 'Some::Random::other_thing' ],
       also      => 'Moose',
   );
 
@@ -798,9 +838,10 @@ version 2.0604
 
   use MyApp::Moose;
 
-  has 'name';
+  has 'name' => ( is => 'ro' );
   has_rw 'size';
   thing;
+  other_thing;
 
   no MyApp::Moose;
 
@@ -824,17 +865,15 @@ modules that use it.
 
 This module provides two public methods:
 
-=over 4
-
-=item B<< Moose::Exporter->setup_import_methods(...) >>
+=head2 Moose::Exporter->setup_import_methods(...)
 
 When you call this method, C<Moose::Exporter> builds custom C<import> and
 C<unimport> methods for your module. The C<import> method
 will export the functions you specify, and can also re-export functions
 exported by some other module (like C<Moose.pm>). If you pass any parameters
 for L<Moose::Util::MetaRole>, the C<import> method will also call
-C<Moose::Util::MetaRole::apply_metaroles> and
-C<Moose::Util::MetaRole::apply_base_class_roles> as needed, after making
+L<Moose::Util::MetaRole::apply_metaroles|Moose::Util::MetaRole/apply_metaroles> and
+L<Moose::Util::MetaRole::apply_base_class_roles|Moose::Util::MetaRole/apply_base_class_roles> as needed, after making
 sure the metaclass is initialized.
 
 The C<unimport> method cleans the caller's namespace of all the exported
@@ -848,7 +887,7 @@ coderef that would be installed.
 
 This method accepts the following parameters:
 
-=over 8
+=over 4
 
 =item * with_meta => [ ... ]
 
@@ -908,13 +947,14 @@ Accordingly, this function is expected to return a metaclass.
 
 =back
 
-You can also provide parameters for C<Moose::Util::MetaRole::apply_metaroles>
-and C<Moose::Util::MetaRole::base_class_roles>. Specifically, valid parameters
+You can also provide parameters for L<Moose::Util::MetaRole::apply_metaroles|Moose::Util::MetaRole/apply_metaroles>
+and L<Moose::Util::MetaRole::apply_base_class_roles|Moose::Util::MetaRole/apply_base_class_roles>. Specifically, valid parameters
 are "class_metaroles", "role_metaroles", and "base_class_roles".
 
-=item B<< Moose::Exporter->build_import_methods(...) >>
+=head2 Moose::Exporter->build_import_methods(...)
 
-Returns two code refs, one for C<import> and one for C<unimport>.
+Returns three code refs, one for C<import>, one for C<unimport> and one for
+C<init_meta>.
 
 Accepts the additional C<install> option, which accepts an arrayref of method
 names to install into your exporting package. The valid options are C<import>
@@ -927,8 +967,6 @@ take a hashref of the form C<< { into => $package } >> to specify the package
 it operates on.
 
 Used by C<setup_import_methods>.
-
-=back
 
 =head1 IMPORTING AND init_meta
 
@@ -967,19 +1005,57 @@ a metaclass for the caller is an error.
 
 See L<Moose/BUGS> for details on reporting bugs.
 
-=head1 AUTHOR
+=head1 AUTHORS
 
-Moose is maintained by the Moose Cabal, along with the help of many contributors. See L<Moose/CABAL> and L<Moose/CONTRIBUTORS> for details.
+=over 4
+
+=item *
+
+Stevan Little <stevan.little@iinteractive.com>
+
+=item *
+
+Dave Rolsky <autarch@urth.org>
+
+=item *
+
+Jesse Luehrs <doy@tozt.net>
+
+=item *
+
+Shawn M Moore <code@sartak.org>
+
+=item *
+
+יובל קוג'מן (Yuval Kogman) <nothingmuch@woobling.org>
+
+=item *
+
+Karen Etheridge <ether@cpan.org>
+
+=item *
+
+Florian Ragwitz <rafl@debian.org>
+
+=item *
+
+Hans Dieter Pearcey <hdp@weftsoar.net>
+
+=item *
+
+Chris Prather <chris@prather.org>
+
+=item *
+
+Matt S Trout <mst@shadowcat.co.uk>
+
+=back
 
 =head1 COPYRIGHT AND LICENSE
 
-This software is copyright (c) 2012 by Infinity Interactive, Inc..
+This software is copyright (c) 2006 by Infinity Interactive, Inc..
 
 This is free software; you can redistribute it and/or modify it under
 the same terms as the Perl 5 programming language system itself.
 
 =cut
-
-
-__END__
-

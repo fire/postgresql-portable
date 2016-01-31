@@ -14,7 +14,7 @@ use vars qw($connect_to_internet_ok $Ua $Thesite $ThesiteURL $Themethod);
 use vars qw(
             $VERSION
 );
-$VERSION = "5.5005";
+$VERSION = "5.5006";
 
 #-> sub CPAN::FTP::ftp_statistics
 # if they want to rewrite, they need to pass in a filehandle
@@ -48,7 +48,8 @@ sub _ftp_statistics {
     if ($@) {
         if (ref $@) {
             if (ref $@ eq "CPAN::Exception::yaml_not_installed") {
-                $CPAN::Frontend->myprint("Warning (usually harmless): $@\n");
+                chomp $@;
+                $CPAN::Frontend->myprintonce("Warning (usually harmless): $@\n");
                 return;
             } elsif (ref $@ eq "CPAN::Exception::yaml_process_error") {
                 my $time = time;

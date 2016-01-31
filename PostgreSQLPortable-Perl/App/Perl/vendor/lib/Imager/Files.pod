@@ -237,10 +237,8 @@ the image.
 =item *
 
 C<data> - When reading data, C<data> is a scalar containing the image
-file data, when writing, C<data> is a reference to the scalar to save
-the image file data too.  For GIF images you will need C<giflib> 4 or
-higher, and you may need to patch C<giflib> to use this option for
-writing.
+file data, or a reference to such a scalar.  When writing, C<data> is
+a reference to the scalar to save the image file data to.
 
   my $data;
   $image->write(data => \$data, type => 'tiff')
@@ -248,6 +246,10 @@ writing.
 
   my $data = $row->{someblob}; # eg. from a database
   my @images = Imager->read_multi(data => $data)
+    or die Imager->errstr;
+
+  # from Imager 0.99
+  my @images = Imager->read_multi(data => \$data)
     or die Imager->errstr;
 
 =item *
@@ -646,6 +648,18 @@ file. (Imager 0.84)
 
 JPEG supports the spatial resolution tags C<i_xres>, C<i_yres> and
 C<i_aspect_only>.
+
+You can also set the following tags when writing to an image, they are
+not set in the image when reading:
+
+=over
+
+C<jpeg_optimize> - set to a non-zero integer to compute optimal
+Huffman coding tables for the image.  This will increase memory usage
+and processing time (about 12% in my simple tests) but can
+significantly reduce file size without a loss of quality.
+
+=back
 
 =for stopwords EXIF
 
@@ -1233,15 +1247,19 @@ image in the C<xsize> and C<ysize> options:
     or die "Cannot read raw image\n";
 
 If your input file has more channels than you want, or (as is common),
-junk in the fourth channel, you can use the C<datachannels> and
-C<storechannels> options to control the number of channels in your input
+junk in the fourth channel, you can use the C<raw_datachannels> and
+C<raw_storechannels> options to control the number of channels in your input
 file and the resulting channels in your image.  For example, if your
 input image uses 32-bits per pixel with red, green, blue and junk
 values for each pixel you could do:
 
-  $img->read(file=>'foo.raw', xsize=>100, ysize=>100, datachannels=>4,
-	     storechannels=>3)
+  $img->read(file=>'foo.raw', xsize => 100, ysize => 100,
+             raw_datachannels => 4, raw_storechannels => 3,
+	     raw_interleave => 0)
     or die "Cannot read raw image\n";
+
+In general, if you supply C<raw_storechannels> you should also supply
+C<raw_datachannels>
 
 Read parameters:
 
@@ -1249,7 +1267,7 @@ Read parameters:
 
 =item *
 
-raw_interleave - controls the ordering of samples within the image.
+C<raw_interleave> - controls the ordering of samples within the image.
 Default: 1.  Alternatively and historically spelled C<interleave>.
 Possible values:
 
@@ -1286,13 +1304,13 @@ C<raw_interleave> parameter.
 
 =item *
 
-raw_storechannels - the number of channels to store in the image.
+C<raw_storechannels> - the number of channels to store in the image.
 Range: 1 to 4.  Default: 3.  Alternatively and historically spelled
 C<storechannels>.
 
 =item *
 
-raw_datachannels - the number of channels to read from the file.
+C<raw_datachannels> - the number of channels to read from the file.
 Range: 1 or more.  Default: 3.  Alternatively and historically spelled
 C<datachannels>.
 
@@ -1378,7 +1396,7 @@ C<png_warning>X<tags,PNG,png_warning> - keyword "Warning".
 
 =back
 
-Each of these tags has a corresponding C< I<base-tag-name>_compressed
+Each of these tags has a corresponding C<< I<base-tag-name>_compressed
 >> tag, eg. C<png_comment_compressed>.  When reading, if the PNG chunk
 is compressed this tag will be set to 1, but is otherwise unset.  When
 writing, Imager will honor the compression tag if set and non-zero,
@@ -1436,7 +1454,7 @@ C<cHRM> chunks are not written.
 
 =item *
 
-C<tags, png_gamma>C<png_gamma> - the gamma of the image. This value is
+X<tags, png_gamma>C<png_gamma> - the gamma of the image. This value is
 not currently used by Imager when processing the image, but this may
 change in the future.
 
@@ -1461,7 +1479,7 @@ representation.  Ignored when writing.
 
 =item *
 
-X<tags, png_time>X<png_time> - the creation time of the file formatted
+X<tags, png_time>C<png_time> - the creation time of the file formatted
 as C<< I<year>-I<month>-I<day>TI<hour>:I<minute>:I<second> >>.  This
 is stored as time data structure in the file, not a string.  If you
 set C<png_time> and it cannot be parsed as above, writing the PNG file
@@ -1472,6 +1490,19 @@ will fail.
 C<i_background> - set from the C<sBKG> when reading an image file.
 
 =back
+
+=for stopwords
+CRC
+
+X<png_ignore_benign_errors>If you're using F<libpng> 1.6 or later, or
+an earlier release configured with C<PNG_BENIGN_ERRORS_SUPPORTED>, you
+can choose to ignore file format errors the authors of F<libpng>
+consider I<benign>, this includes at least CRC errors and palette
+index overflows.  Do this by supplying a true value for the
+C<png_ignore_benign_errors> parameter to the read() method:
+
+  $im->read(file => "foo.png", png_ignore_benign_errors => 1)
+    or die $im->errstr;
 
 =head2 ICO (Microsoft Windows Icon) and CUR (Microsoft Windows Cursor)
 
@@ -1582,9 +1613,10 @@ control reading of ICO/CUR files:
 
 =item *
 
-ico_masked - if true, the default, then the icon/cursors mask is
-applied as an alpha channel to the image.  This may result in a
-paletted image being returned as a direct color image.  Default: 1
+C<ico_masked> - if true, the default, then the icon/cursors mask is
+applied as an alpha channel to the image, unless that image already
+has an alpha channel.  This may result in a paletted image being
+returned as a direct color image.  Default: 1
 
   # retrieve the image as stored, without using the mask as an alpha
   # channel
@@ -1593,6 +1625,15 @@ paletted image being returned as a direct color image.  Default: 1
 
 This was introduced in Imager 0.60.  Previously reading ICO images
 acted as if C<ico_masked =E<gt> 0>.
+
+=item *
+
+C<ico_alpha_masked> - if true, then the icon/cursor mask is applied as
+an alpha channel to images that already have an alpha mask.  Note that
+this will only make pixels transparent, not opaque.  Default: 0.
+
+Note: If you get different results between C<ico_alpha_masked> being
+set to 0 and 1, your mask may broke when used with the Win32 API.
 
 =back
 
@@ -1967,5 +2008,9 @@ only 2 colors used - it will have a 128 color table anyway.
 =head1 SEE ALSO
 
 Imager(3)
+
+=head1 AUTHOR
+
+Tony Cook <tonyc@cpan.org>, Arnar M. Hrafnkelsson
 
 =cut

@@ -1,16 +1,11 @@
 package B::Hooks::EndOfScope::PP;
-BEGIN {
-  $B::Hooks::EndOfScope::PP::AUTHORITY = 'cpan:FLORA';
-}
-{
-  $B::Hooks::EndOfScope::PP::VERSION = '0.12';
-}
 # ABSTRACT: Execute code after a scope finished compilation - PP implementation
 
 use warnings;
 use strict;
 
-use Module::Runtime 'require_module';
+our $VERSION = '0.15';
+
 use constant _PERL_VERSION => "$]";
 
 BEGIN {
@@ -19,16 +14,16 @@ BEGIN {
     die "By design B::Hooks::EndOfScope does not operate in pure-perl mode on perl 5.9.X\n"
   }
   elsif (_PERL_VERSION < '5.010') {
-    require_module('B::Hooks::EndOfScope::PP::HintHash');
+    require B::Hooks::EndOfScope::PP::HintHash;
     *on_scope_end = \&B::Hooks::EndOfScope::PP::HintHash::on_scope_end;
   }
   else {
-    require_module('B::Hooks::EndOfScope::PP::FieldHash');
+    require B::Hooks::EndOfScope::PP::FieldHash;
     *on_scope_end = \&B::Hooks::EndOfScope::PP::FieldHash::on_scope_end;
   }
 }
 
-use Sub::Exporter::Progressive -setup => {
+use Sub::Exporter::Progressive 0.001006 -setup => {
   exports => ['on_scope_end'],
   groups  => { default => ['on_scope_end'] },
 };
@@ -49,17 +44,42 @@ sub __invoke_callback {
   };
 }
 
+#pod =head1 DESCRIPTION
+#pod
+#pod This is the pure-perl implementation of L<B::Hooks::EndOfScope> based only on
+#pod modules available as part of the perl core. Its leaner sibling
+#pod L<B::Hooks::EndOfScope::XS> will be automatically preferred if all
+#pod dependencies are available and C<$ENV{B_HOOKS_ENDOFSCOPE_IMPLEMENTATION}> is
+#pod not set to C<'PP'>.
+#pod
+#pod =func on_scope_end
+#pod
+#pod     on_scope_end { ... };
+#pod
+#pod     on_scope_end $code;
+#pod
+#pod Registers C<$code> to be executed after the surrounding scope has been
+#pod compiled.
+#pod
+#pod This is exported by default. See L<Sub::Exporter> on how to customize it.
+#pod
+#pod =cut
 
 1;
 
 __END__
+
 =pod
 
-=encoding utf-8
+=encoding UTF-8
 
 =head1 NAME
 
 B::Hooks::EndOfScope::PP - Execute code after a scope finished compilation - PP implementation
+
+=head1 VERSION
+
+version 0.15
 
 =head1 DESCRIPTION
 
@@ -98,10 +118,9 @@ Peter Rabbitson <ribasushi@cpan.org>
 
 =head1 COPYRIGHT AND LICENSE
 
-This software is copyright (c) 2012 by Florian Ragwitz.
+This software is copyright (c) 2008 by Florian Ragwitz.
 
 This is free software; you can redistribute it and/or modify it under
 the same terms as the Perl 5 programming language system itself.
 
 =cut
-

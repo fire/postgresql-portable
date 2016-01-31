@@ -297,21 +297,22 @@ L<Data::Printer::Filter::ClassicRegex> changes the way Data::Printer
 dumps regular expressions, doing it the classic C<qr//> way that got
 popular in C<Data::Dumper>.
 
-=head2 URI
-
-L<Data::Printer::Filter::URI> pretty-prints L<URI> objects, displaying
-the URI as a string instead of dumping the object.
-
 =head2 JSON
 
-L<Data::Printer::Filter::JSON> lets you see your JSON structures
-replacing boolean objects with simple C<true/false> strings!
+L<Data::Printer::Filter::JSON>, by Nuba Princigalli, lets you see
+your JSON structures replacing boolean objects with simple C<true/false>
+strings!
 
 =head2 URIs
 
 L<Data::Printer::Filter::URI> filters through several L<URI> manipulation
 classes and displays the URI as a colored string. A very nice addition
 by Stanislaw Pusep (SYP).
+
+=head2 Perl Data Language (PDL)
+
+L<Data::Printer::Filter::PDL>, by Zakariyya Mughal, lets you quickly see
+the relevant contents of a PDL variable.
 
 =head1 USING MORE THAN ONE FILTER FOR THE SAME TYPE/CLASS
 
@@ -321,7 +322,7 @@ called in order, until one of them returns a string. This lets
 you have several filters inspecting the same given value until
 one of them decides to actually treat it somehow.
 
-If your filter catched a value and you don't want to treat it,
+If your filter caught a value and you don't want to treat it,
 simply return and the next filter will be called. If there are no
 other filters for that particular class or type available, the
 standard Data::Printer calls will be used.

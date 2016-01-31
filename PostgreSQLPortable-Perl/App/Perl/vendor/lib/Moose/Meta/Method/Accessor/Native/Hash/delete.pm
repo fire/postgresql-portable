@@ -1,24 +1,12 @@
 package Moose::Meta::Method::Accessor::Native::Hash::delete;
-BEGIN {
-  $Moose::Meta::Method::Accessor::Native::Hash::delete::AUTHORITY = 'cpan:STEVAN';
-}
-{
-  $Moose::Meta::Method::Accessor::Native::Hash::delete::VERSION = '2.0604';
-}
+our $VERSION = '2.1604';
 
 use strict;
 use warnings;
 
 use Moose::Role;
 
-with 'Moose::Meta::Method::Accessor::Native::Hash::Writer' => {
-    -excludes => [
-        qw(
-            _inline_optimized_set_new_value
-            _return_value
-            )
-    ],
-};
+with 'Moose::Meta::Method::Accessor::Native::Hash::Writer';
 
 sub _adds_members { 0 }
 

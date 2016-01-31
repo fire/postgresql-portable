@@ -2,7 +2,7 @@
 # vim: ts=4 sts=4 sw=4:
 use strict;
 package CPAN;
-$CPAN::VERSION = '1.9800';
+$CPAN::VERSION = '2.10';
 $CPAN::VERSION =~ s/_//;
 
 # we need to run chdir all over and we would get at wrong libraries
@@ -886,7 +886,7 @@ this variable in either a CPAN/MyConfig.pm or a CPAN/Config.pm in your
 #       be politely squashed.  Any bug that causes every eval {} to have to be
 #       modified should be not so politely squashed.
 #
-#       Those are my current opinions.  It is also my optinion that polite
+#       Those are my current opinions.  It is also my opinion that polite
 #       arguments degenerate to personal arguments far too frequently, and that
 #       when they do, it's because both people wanted it to, or at least didn't
 #       sufficiently want it not to.
@@ -918,6 +918,9 @@ sub getcwd {Cwd::getcwd();}
 
 #-> sub CPAN::fastcwd ;
 sub fastcwd {Cwd::fastcwd();}
+
+#-> sub CPAN::getdcwd ;
+sub getdcwd {Cwd::getdcwd();}
 
 #-> sub CPAN::backtickcwd ;
 sub backtickcwd {my $cwd = `cwd`; chomp $cwd; $cwd}
@@ -1020,6 +1023,18 @@ sub has_usable {
                             },
                            ],
 
+               'CPAN::Meta::Requirements' => [
+                            sub {
+                                require CPAN::Meta::Requirements;
+                                unless (CPAN::Version->vge(CPAN::Meta::Requirements->VERSION, 2.120920)) {
+                                    for ("Will not use CPAN::Meta::Requirements, need version 2.120920\n") {
+                                        $CPAN::Frontend->mywarn($_);
+                                        die $_;
+                                    }
+                                }
+                            },
+                           ],
+
                LWP => [ # we frequently had "Can't locate object
                         # method "new" via package "LWP::UserAgent" at
                         # (eval 69) line 2006
@@ -1103,6 +1118,20 @@ sub has_usable {
     return $HAS_USABLE->{$mod} = 1;
 }
 
+sub frontend {
+    shift;
+    $CPAN::Frontend = shift if @_;
+    $CPAN::Frontend;
+}
+
+sub use_inst {
+    my ($self, $module) = @_;
+
+    unless ($self->has_inst($module)) {
+        $self->frontend->mydie("$module not installed, cannot continue");
+    }
+}
+
 #-> sub CPAN::has_inst
 sub has_inst {
     my($self,$mod,$message) = @_;
@@ -1111,7 +1140,7 @@ sub has_inst {
     my %dont = map { $_ => 1 } keys %{$CPAN::META->{dontload_hash}||{}},
         keys %{$CPAN::Config->{dontload_hash}||{}},
             @{$CPAN::Config->{dontload_list}||[]};
-    if (defined $message && $message eq "no"  # afair only used by Nox
+    if (defined $message && $message eq "no"  # as far as I remember only used by Nox
         ||
         $dont{$mod}
        ) {
@@ -1125,7 +1154,7 @@ sub has_inst {
     if ($INC{$file}) {
         # checking %INC is wrong, because $INC{LWP} may be true
         # although $INC{"URI/URL.pm"} may have failed. But as
-        # I really want to say "bla loaded OK", I have to somehow
+        # I really want to say "blah loaded OK", I have to somehow
         # cache results.
         ### warn "$file in %INC"; #debug
         return 1;
@@ -1316,9 +1345,28 @@ sub is_installed {
 
 sub _list_sorted_descending_is_tested {
     my($self) = @_;
-    sort
+    my $foul = 0;
+    my @sorted = sort
         { ($self->{is_tested}{$b}||0) <=> ($self->{is_tested}{$a}||0) }
-            keys %{$self->{is_tested}}
+            grep
+                { if ($foul){ 0 } elsif (-e) { 1 } else { $foul = $_; 0 } }
+                    keys %{$self->{is_tested}};
+    if ($foul) {
+        $CPAN::Frontend->mywarn("Lost build_dir detected ($foul), giving up all cached test results of currently running session.\n");
+        for my $dbd (keys %{$self->{is_tested}}) { # distro-build-dir
+        SEARCH: for my $d ($CPAN::META->all_objects("CPAN::Distribution")) {
+                if ($d->{build_dir} && $d->{build_dir} eq $dbd) {
+                    $CPAN::Frontend->mywarn(sprintf "Flushing cache for %s\n", $d->pretty_id);
+                    $d->fforce("");
+                    last SEARCH;
+                }
+            }
+            delete $self->{is_tested}{$dbd};
+        }
+        return ();
+    } else {
+        return @sorted;
+    }
 }
 
 #-> sub CPAN::set_perl5lib
@@ -1597,7 +1645,7 @@ in html or plain text format.
 =item C<ls> globbing_expression
 
 The first form lists all distribution files in and below an author's
-CPAN directory as stored in the CHECKUMS files distributed on
+CPAN directory as stored in the CHECKSUMS files distributed on
 CPAN. The listing recurses into subdirectories.
 
 The second form limits or expands the output with shell
@@ -1702,7 +1750,9 @@ C<$CPAN::Config-E<gt>{cpan_home}/Bundle> directory. The file contains
 a list of all modules that are both available from CPAN and currently
 installed within @INC. Duplicates of each distribution are suppressed.
 The name of the bundle file is based on the current date and a
-counter.
+counter, e.g. F<Bundle/Snapshot_2012_05_21_00.pm>. This is installed
+again by running C<cpan Bundle::Snapshot_2012_05_21_00>, or installing
+C<Bundle::Snapshot_2012_05_21_00> from the CPAN shell.
 
 Return value: path to the written file.
 
@@ -1715,6 +1765,21 @@ This commands provides a statistical overview over recent download
 activities. The data for this is collected in the YAML file
 C<FTPstats.yml> in your C<cpan_home> directory. If no YAML module is
 configured or YAML not installed, no stats are provided.
+
+=over
+
+=item install_tested
+
+Install all distributions that have been tested successfully but have
+not yet been installed. See also C<is_tested>.
+
+=item is_tested
+
+List all build directories of distributions that have been tested
+successfully but have not yet been installed. See also
+C<install_tested>.
+
+=back
 
 =head2 mkmyconfig
 
@@ -1829,7 +1894,7 @@ separated):
 
 Modules know their associated Distribution objects. They always refer
 to the most recent official release. Developers may mark their releases
-as unstable development versions (by inserting an underbar into the
+as unstable development versions (by inserting an underscore into the
 module version number which will also be reflected in the distribution
 name when you run 'make dist'), so the really hottest and newest
 distribution is not always the default.  If a module Foo circulates
@@ -1886,6 +1951,39 @@ The usual shell redirection symbols C< | > and C<< > >> are recognized
 by the cpan shell B<only when surrounded by whitespace>. So piping to
 pager or redirecting output into a file works somewhat as in a normal
 shell, with the stipulation that you must type extra spaces.
+
+=head2 Plugin support ***EXPERIMENTAL***
+
+Plugins are objects that implement any of currently eight methods:
+
+  pre_get
+  post_get
+  pre_make
+  post_make
+  pre_test
+  post_test
+  pre_install
+  post_install
+
+The C<plugin_list> configuration parameter holds a list of strings of
+the form
+
+  Modulename=arg0,arg1,arg2,arg3,...
+
+At run time, each listed plugin is instantiated as a singleton object
+by running the equivalent of this pseudo code:
+
+  my $plugin = <string representation from config>;
+  <generate Modulename and arguments from $plugin>;
+  my $p = $instance{$plugin} ||= Modulename->new($arg0,$arg1,...);
+
+The generated singletons are kept around from instantiation until the
+end of the shell session. <plugin_list> can be reconfigured at any
+time at run time. While the cpan shell is running, it checks all
+activated plugins at each of the 8 reference points listed above and
+runs the respective method if it is implemented for that object. The
+method is called with the active CPAN::Distribution object passed in
+as an argument.
 
 =head1 CONFIGURATION
 
@@ -2055,6 +2153,8 @@ currently defined:
   patch              path to external prg
   patches_dir        local directory containing patch files
   perl5lib_verbosity verbosity level for PERL5LIB additions
+  plugin_list        list of active hooks (see Plugin support above
+                     and the CPAN::Plugin module)
   prefer_external_tar
                      per default all untar operations are done with
                      Archive::Tar; by setting this variable to true
@@ -2074,12 +2174,14 @@ currently defined:
   proxy_user         username for accessing an authenticating proxy
   proxy_pass         password for accessing an authenticating proxy
   randomize_urllist  add some randomness to the sequence of the urllist
+  recommends_policy  whether recommended prerequisites should be included
   scan_cache         controls scanning of cache ('atstart', 'atexit' or 'never')
   shell              your favorite shell
   show_unparsable_versions
                      boolean if r command tells which modules are versionless
   show_upload_date   boolean if commands should try to determine upload date
   show_zero_versions boolean if r command tells for which modules $version==0
+  suggests_policy    whether suggested prerequisites should be included
   tar                location of external program tar
   tar_verbosity      verbosity level for the tar command
   term_is_latin      deprecated: if true Unicode is translated to ISO-8859-1
@@ -2091,6 +2193,7 @@ currently defined:
                      CPAN::Reporter history)
   unzip              location of external program unzip
   urllist            arrayref to nearby CPAN sites (or equivalent locations)
+  use_prompt_default set PERL_MM_USE_DEFAULT for configure/make/test/install
   use_sqlite         use CPAN::SQLite for metadata storage (fast and lean)
   username           your username if you CPAN server wants one
   version_timeout    stops version parsing after this many seconds.
@@ -2163,6 +2266,10 @@ Calls Cwd::getcwd
 
 Calls Cwd::fastcwd
 
+=item getdcwd
+
+Calls Cwd::getdcwd
+
 =item backtickcwd
 
 Calls the external command cwd.
@@ -2233,8 +2340,7 @@ C<ask/no>, CPAN.pm asks the user and sets the default accordingly.
 
 =head2 Configuration for individual distributions (I<Distroprefs>)
 
-(B<Note:> This feature has been introduced in CPAN.pm 1.8854 and is
-still considered beta quality)
+(B<Note:> This feature has been introduced in CPAN.pm 1.8854)
 
 Distributions on CPAN usually behave according to what we call the
 CPAN mantra. Or since the advent of Module::Build we should talk about
@@ -2463,7 +2569,7 @@ CPAN mantra. See below under I<Processing Instructions>.
 
 =item match [hash]
 
-A hashref with one or more of the keys C<distribution>, C<modules>,
+A hashref with one or more of the keys C<distribution>, C<module>,
 C<perl>, C<perlconfig>, and C<env> that specify whether a document is
 targeted at a specific CPAN distribution or installation.
 Keys prefixed with C<not_> negates the corresponding match.
@@ -2881,11 +2987,6 @@ there are no dependencies in the way. To install an object along with all
 its dependencies, use CPAN::Shell->install.
 
 Note that install() gives no meaningful return value. See uptodate().
-
-=item CPAN::Distribution::install_tested()
-
-Install all distributions that have tested successfully but
-not yet installed. See also C<is_tested>.
 
 =item CPAN::Distribution::isa_perl()
 
@@ -3339,6 +3440,11 @@ loaded:
 
 See the source for details.
 
+=item use_inst($module)
+
+Similary to L<has_inst()> tries to load optional library but also dies if
+library is not available
+
 =item has_usable($module)
 
 Returns true if the module is installed and in a usable state. Only
@@ -3350,6 +3456,12 @@ source for details.
 The constructor for all the singletons used to represent modules,
 distributions, authors, and bundles. If the object already exists, this
 method returns the object; otherwise, it calls the constructor.
+
+=item frontend()
+
+=item frontend($new_frontend)
+
+Getter/setter for frontend object. Method just allows to subclass CPAN.pm.
 
 =back
 
@@ -3432,7 +3544,7 @@ annoying that so many distributions need some interactive configuring. So
 what you can try to accomplish in your private bundle file is to have the
 packages that need to be configured early in the file and the gentle
 ones later, so you can go out for coffee after a few minutes and leave CPAN.pm
-to churn away untended.
+to churn away unattended.
 
 =head1 WORKING WITH CPAN.pm BEHIND FIREWALLS
 
@@ -3724,7 +3836,7 @@ which to try in which order.
 
 Henk P. Penning maintains a site that collects data about CPAN sites:
 
-  http://www.cs.uu.nl/people/henkp/mirmon/cpan.html
+  http://mirrors.cpan.org/
 
 Also, feel free to play with experimental features. Run
 
@@ -3760,8 +3872,9 @@ Speaking of the build directory. Do I have to clean it up myself?
 You have the choice to set the config variable C<scan_cache> to
 C<never>. Then you must clean it up yourself. The other possible
 values, C<atstart> and C<atexit> clean up the build directory when you
-start or exit the CPAN shell, respectively. If you never start up the
-CPAN shell, you probably also have to clean up the build directory
+start (or more precisely, after the first extraction into the build
+directory) or exit the CPAN shell, respectively. If you never start up
+the CPAN shell, you probably also have to clean up the build directory
 yourself.
 
 =back
@@ -3770,7 +3883,7 @@ yourself.
 
 =head2 OLD PERL VERSIONS
 
-CPAN.pm is regularly tested to run under 5.004, 5.005, and assorted
+CPAN.pm is regularly tested to run under 5.005 and assorted
 newer versions. It is getting more and more difficult to get the
 minimal prerequisites working on older perls. It is close to
 impossible to get the whole Bundle::CPAN working there. If you're in
@@ -3833,5 +3946,9 @@ you have this directory in your PATH variable (or some equivalent in
 your operating system) then typing C<cpan> in a console window will
 work for you as well. Above that the utility provides several
 commandline shortcuts.
+
+melezhik (Alexey) sent me a link where he published a chef recipe to
+work with CPAN.pm: http://community.opscode.com/cookbooks/cpan.
+
 
 =cut

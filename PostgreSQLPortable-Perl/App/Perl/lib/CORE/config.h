@@ -9,9 +9,9 @@
 
 /* Package name      : perl5
  * Source directory  : 
- * Configuration time: Tue Mar 12 13:56:09 2013
+ * Configuration time: Tue Jan  5 20:02:32 2016
  * Configured by     : strawberry-perl
- * Target system     : Win32 strawberry-perl 5.16.3.1 #1 Tue Mar 12 13:55:20 2013 i386
+ * Target system     : Win32 strawberry-perl 5.20.3.2 #1 Tue Jan  5 20:00:32 2016 i386
  */
 
 #ifndef _config_h_
@@ -646,13 +646,13 @@
  *	should be included.
  */
 #define I_DBM	/**/
-#define I_RPCSVC_DBM	/**/
+/*#define I_RPCSVC_DBM	/ **/
 
 /* I_DLFCN:
  *	This symbol, if defined, indicates that <dlfcn.h> exists and should
  *	be included.
  */
-#define I_DLFCN		/**/
+/*#define I_DLFCN		/ **/
 
 /* I_FCNTL:
  *	This manifest constant tells the C program to include <fcntl.h>.
@@ -702,12 +702,6 @@
  *	include <netinet/in.h>. Otherwise, you may try <sys/in.h>.
  */
 /*#define I_NETINET_IN	/ **/
-
-/* I_SFIO:
- *	This symbol, if defined, indicates to the C program that it should
- *	include <sfio.h>.
- */
-/*#define	I_SFIO		/ **/
 
 /* I_STDDEF:
  *	This symbol, if defined, indicates that <stddef.h> exists and should
@@ -811,26 +805,6 @@
  */
 /*#define I_SYS_WAIT	/ **/
 
-/* I_TERMIO:
- *	This symbol, if defined, indicates that the program should include
- *	<termio.h> rather than <sgtty.h>.  There are also differences in
- *	the ioctl() calls that depend on the value of this symbol.
- */
-/* I_TERMIOS:
- *	This symbol, if defined, indicates that the program should include
- *	the POSIX termios.h rather than sgtty.h or termio.h.
- *	There are also differences in the ioctl() calls that depend on the
- *	value of this symbol.
- */
-/* I_SGTTY:
- *	This symbol, if defined, indicates that the program should include
- *	<sgtty.h> rather than <termio.h>.  There are also differences in
- *	the ioctl() calls that depend on the value of this symbol.
- */
-/*#define I_TERMIO		/ **/
-/*#define I_TERMIOS		/ **/
-/*#define I_SGTTY		/ **/
-
 /* I_UNISTD:
  *	This symbol, if defined, indicates to the C program that it should
  *	include <unistd.h>.
@@ -890,19 +864,7 @@
  *	feature tests from Configure are generally more reliable.
  */
 #define OSNAME "MSWin32"		/**/
-#define OSVERS "4.0"		/**/
-
-/* USE_CROSS_COMPILE:
- *	This symbol, if defined, indicates that Perl is being cross-compiled.
- */
-/* PERL_TARGETARCH:
- *	This symbol, if defined, indicates the target architecture
- *	Perl has been cross-compiled to.  Undefined if not a cross-compile.
- */
-#ifndef USE_CROSS_COMPILE
-/*#define	USE_CROSS_COMPILE	/ **/
-#define	PERL_TARGETARCH	""	/**/
-#endif
+#define OSVERS "6.3"		/**/
 
 /* MULTIARCH:
  *	This symbol, if defined, signifies that the build
@@ -916,13 +878,10 @@
 /* MEM_ALIGNBYTES:
  *	This symbol contains the number of bytes required to align a
  *	double, or a long double when applicable. Usual values are 2,
- *	4 and 8. The default is eight, for safety.
+ *	4 and 8. The default is eight, for safety.  For cross-compiling
+ *  	or multiarch support, Configure will set a minimum of 8.
  */
-#if defined(USE_CROSS_COMPILE) || defined(MULTIARCH)
-#  define MEM_ALIGNBYTES 8
-#else
 #define MEM_ALIGNBYTES 8
-#endif
 
 /* ARCHLIB:
  *	This variable, if defined, holds the name of the directory in
@@ -946,7 +905,7 @@
  *	where library files may be held under a private library, for
  *	instance.
  */
-#define ARCHNAME "MSWin32-x86-multi-thread"		/**/
+#define ARCHNAME "MSWin32-x86-multi-thread-64int"		/**/
 
 /* BIN:
  *	This symbol holds the path of the bin directory where the package will
@@ -962,7 +921,7 @@
  */
 #define BIN "C:\\strawberry\\perl\\bin"	/**/
 #define BIN_EXP "C:\\strawberry\\perl\\bin"	/**/
-/*#define PERL_RELOCATABLE_INC  		/ **/
+#define PERL_RELOCATABLE_INC "undef" 		/**/
 
 /* INTSIZE:
  *	This symbol contains the value of sizeof(int) so that the C
@@ -984,7 +943,7 @@
  *	This symbol holds the hexadecimal constant defined in byteorder,
  *	in a UV, i.e. 0x1234 or 0x4321 or 0x12345678, etc...
  *	If the compiler supports cross-compiling or multiple-architecture
- *	binaries (eg. on NeXT systems), use compiler-defined macros to
+ *	binaries (e.g. on NeXT systems), use compiler-defined macros to
  *	determine the byte order.
  *	On NeXT 3.2 (and greater), you can build "Fat" Multiple Architecture
  *	Binaries (MAB) on either big endian or little endian machines.
@@ -996,7 +955,7 @@
  *	so the default case (for NeXT) is big endian to catch them.
  *	This might matter for NeXT 3.0.
  */
-#if defined(USE_CROSS_COMPILE) || defined(MULTIARCH)
+#if defined(MULTIARCH)
 #  ifdef __LITTLE_ENDIAN__
 #    if LONGSIZE == 4
 #      define BYTEORDER 0x1234
@@ -1020,7 +979,7 @@
 #    define BYTEORDER 0x4321
 #  endif
 #else
-#define BYTEORDER 0x1234	/* large digits for MSB */
+#define BYTEORDER 0x12345678	/* large digits for MSB */
 #endif /* NeXT */
 
 /* CHARBITS:
@@ -1952,7 +1911,7 @@
  *	C preprocessor can make decisions based on it.  It is only
  *	defined if the system supports long long.
  */
-/*#define HAS_LONG_LONG		/ **/
+#define HAS_LONG_LONG		/**/
 #ifdef HAS_LONG_LONG
 #define LONGLONGSIZE 8		/**/
 #endif
@@ -2359,9 +2318,21 @@
  *	This symbol, if defined, indicates that the struct sockaddr_in6
  *	structure has a member called sin6_scope_id.
  */
+/* HAS_IP_MREQ:
+ *	This symbol, if defined, indicates the availability of
+ *	struct ip_mreq;
+ */
+/* HAS_IP_MREQ_SOURCE:
+ *	This symbol, if defined, indicates the availability of
+ *	struct ip_mreq_source;
+ */
 /* HAS_IPV6_MREQ:
  *	This symbol, if defined, indicates the availability of
  *	struct ipv6_mreq;
+ */
+/* HAS_IPV6_MREQ_SOURCE:
+ *	This symbol, if defined, indicates the availability of
+ *	struct ipv6_mreq_source;
  */
 #define	HAS_SOCKET		/**/
 /*#define	HAS_SOCKETPAIR	/ **/
@@ -2374,7 +2345,10 @@
 /*#define	HAS_SCM_RIGHTS	/ **/
 /*#define	HAS_SOCKADDR_IN6	/ **/
 #define	HAS_SIN6_SCOPE_ID	/**/
+/*#define	HAS_IP_MREQ	/ **/
+/*#define	HAS_IP_MREQ_SOURCE	/ **/
 /*#define	HAS_IPV6_MREQ	/ **/
+/*#define	HAS_IPV6_MREQ_SOURCE	/ **/
 
 /* HAS_SRAND48_R:
  *	This symbol, if defined, indicates that the srand48_r routine
@@ -2661,10 +2635,17 @@
 #define DOUBLESIZE 8		/**/
 
 /* EBCDIC:
- *     This symbol, if defined, indicates that this system uses
+ *	This symbol, if defined, indicates that this system uses
  *	EBCDIC encoding.
  */
+/* BOOTSTRAP_CHARSET:
+ *	This symbol, if defined, indicates that this system needs
+ *	converting various files to the native character set before
+ *	bringing up perl on a system that has a non-ASCII character
+ *	set and no working perl.
+ */
 /*#define	EBCDIC 		/ **/
+/*#define	BOOTSTRAP_CHARSET	/ **/
 
 /* Fpos_t:
  *	This symbol holds the type used to declare file positions in libc.
@@ -2679,7 +2660,7 @@
 #define	Gid_t_f		"ld"		/**/
 
 /* Gid_t_sign:
- *	This symbol holds the signedess of a Gid_t.
+ *	This symbol holds the signedness of a Gid_t.
  *	1 for unsigned, -1 for signed.
  */
 #define Gid_t_sign	-1		/* GID sign */
@@ -3093,10 +3074,10 @@
  *	function used to generate normalized random numbers.
  *	Values include 15, 16, 31, and 48.
  */
-#define Drand01()		(rand()/(double)((unsigned)1<<RANDBITS))		/**/
-#define Rand_seed_t		unsigned		/**/
-#define seedDrand01(x)	srand((Rand_seed_t)x)	/**/
-#define RANDBITS		15		/**/
+#define Drand01()		Perl_drand48()		/**/
+#define Rand_seed_t		U32		/**/
+#define seedDrand01(x)	Perl_drand48_init((Rand_seed_t)x)	/**/
+#define RANDBITS		48		/**/
 
 /* Select_fd_set_t:
  *	This symbol holds the type used for the 2nd, 3rd, and 4th
@@ -3238,7 +3219,7 @@
 #define	Uid_t_f		"ld"		/**/
 
 /* Uid_t_sign:
- *	This symbol holds the signedess of a Uid_t.
+ *	This symbol holds the signedness of a Uid_t.
  *	1 for unsigned, -1 for signed.
  */
 #define Uid_t_sign	-1		/* UID sign */
@@ -3311,29 +3292,36 @@
 #define PERL_VENDORLIB_EXP "C:\\strawberry\\perl\\vendor\\lib"		/**/
 #define PERL_VENDORLIB_STEM ""		/**/
 
-/* VOIDFLAGS:
- *	This symbol indicates how much support of the void type is given by this
- *	compiler.  What various bits mean:
- *
- *	    1 = supports declaration of void
- *	    2 = supports arrays of pointers to functions returning void
- *	    4 = supports comparisons between pointers to void functions and
- *		    addresses of void functions
- *	    8 = supports declaration of generic void pointers
- *
- *	The package designer should define VOIDUSED to indicate the requirements
- *	of the package.  This can be done either by #defining VOIDUSED before
- *	including config.h, or by defining defvoidused in Myinit.U.  If the
- *	latter approach is taken, only those flags will be tested.  If the
- *	level of void support necessary is not present, defines void to int.
+/* I_TERMIO:
+ *	This symbol, if defined, indicates that the program should include
+ *	<termio.h> rather than <sgtty.h>.  There are also differences in
+ *	the ioctl() calls that depend on the value of this symbol.
  */
-#ifndef VOIDUSED
-#define VOIDUSED 15
-#endif
-#define VOIDFLAGS 15
-#if (VOIDFLAGS & VOIDUSED) != VOIDUSED
-#define void int		/* is void to be avoided? */
-#define M_VOID			/* Xenix strikes again */
+/* I_TERMIOS:
+ *	This symbol, if defined, indicates that the program should include
+ *	the POSIX termios.h rather than sgtty.h or termio.h.
+ *	There are also differences in the ioctl() calls that depend on the
+ *	value of this symbol.
+ */
+/* I_SGTTY:
+ *	This symbol, if defined, indicates that the program should include
+ *	<sgtty.h> rather than <termio.h>.  There are also differences in
+ *	the ioctl() calls that depend on the value of this symbol.
+ */
+/*#define I_TERMIO		/ **/
+/*#define I_TERMIOS		/ **/
+/*#define I_SGTTY		/ **/
+
+/* USE_CROSS_COMPILE:
+ *	This symbol, if defined, indicates that Perl is being cross-compiled.
+ */
+/* PERL_TARGETARCH:
+ *	This symbol, if defined, indicates the target architecture
+ *	Perl has been cross-compiled to.  Undefined if not a cross-compile.
+ */
+#ifndef USE_CROSS_COMPILE
+/*#define	USE_CROSS_COMPILE	/ **/
+#define	PERL_TARGETARCH	""	/**/
 #endif
 
 /* PERL_USE_DEVEL:
@@ -3701,7 +3689,7 @@
 /*#define     HAS_INT64_T               / **/
 
 /* HAS_ISBLANK:
- *	This manifest constant lets the C program know that isblank 
+ *	This manifest constant lets the C program know that isblank
  *	is available.
  */
 /*#define HAS_ISBLANK		/ **/
@@ -3897,12 +3885,6 @@
  *	available to set process title.
  */
 /*#define HAS_SETPROCTITLE		/ **/
-
-/* USE_SFIO:
- *	This symbol, if defined, indicates that sfio should
- *	be used.
- */
-/*#define	USE_SFIO		/ **/
 
 /* HAS_SIGNBIT:
  *	This symbol, if defined, indicates that the signbit routine is
@@ -4169,8 +4151,10 @@
 #define USE_DYNAMIC_LOADING		/**/
 
 /* FFLUSH_NULL:
- *	This symbol, if defined, tells that fflush(NULL) does flush
- *	all pending stdio output.
+ *	This symbol, if defined, tells that fflush(NULL) correctly
+ *	flushes all pending stdio output without side effects. In
+ *	particular, on some platforms calling fflush(NULL) *still*
+ *	corrupts STDIN if it is a pipe.
  */
 /* FFLUSH_ALL:
  *	This symbol, if defined, tells that to flush
@@ -4306,7 +4290,7 @@
  *	This symbol, if defined, indicates that <stdbool.h> exists and
  *	can be included.
  */
-/*#define	I_STDBOOL		/ **/
+#define	I_STDBOOL		/**/
 
 /* I_SUNMATH:
  *	This symbol, if defined, indicates that <sunmath.h> exists and
@@ -4483,8 +4467,8 @@
  *	This symbol, if defined, indicates that a variable of type NVTYPE
  *	stores 0.0 in memory as all bits zero.
  */
-#define	IVTYPE		long		/**/
-#define	UVTYPE		unsigned long		/**/
+#define	IVTYPE		long long		/**/
+#define	UVTYPE		unsigned long long		/**/
 #define	I8TYPE		char		/**/
 #define	U8TYPE		unsigned char		/**/
 #define	I16TYPE		short	/**/
@@ -4496,8 +4480,8 @@
 #define	U64TYPE		unsigned long long	/**/
 #endif
 #define	NVTYPE		double		/**/
-#define	IVSIZE		4		/**/
-#define	UVSIZE		4		/**/
+#define	IVSIZE		8		/**/
+#define	UVSIZE		8		/**/
 #define	I8SIZE		1		/**/
 #define	U8SIZE		1		/**/
 #define	I16SIZE		2	/**/
@@ -4509,8 +4493,8 @@
 #define	U64SIZE		8	/**/
 #endif
 #define	NVSIZE		8		/**/
-#define	NV_PRESERVES_UV
-#define	NV_PRESERVES_UV_BITS	32
+#undef	NV_PRESERVES_UV
+#define	NV_PRESERVES_UV_BITS	53
 #define	NV_OVERFLOWS_INTEGERS_AT	256.0*256.0*256.0*256.0*256.0*256.0*2.0*2.0*2.0*2.0*2.0
 #define	NV_ZERO_IS_ALLBITS_ZERO
 #if UVSIZE == 8
@@ -4559,11 +4543,11 @@
  *	This symbol defines the format string used for printing a Perl NV
  *	using %g-ish floating point format.
  */
-#define	IVdf		"ld"		/**/
-#define	UVuf		"lu"		/**/
-#define	UVof		"lo"		/**/
-#define	UVxf		"lx"		/**/
-#define	UVXf		"lX"		/**/
+#define	IVdf		"I64d"		/**/
+#define	UVuf		"I64u"		/**/
+#define	UVof		"I64o"		/**/
+#define	UVxf		"I64x"		/**/
+#define	UVXf		"I64X"		/**/
 #define	NVef		"e"		/**/
 #define	NVff		"f"		/**/
 #define	NVgf		"g"		/**/
@@ -4581,7 +4565,7 @@
  *	This variable contains the size of struct stat's st_ino in bytes.
  */
 /* ST_INO_SIGN:
- *	This symbol holds the signedess of struct stat's st_ino.
+ *	This symbol holds the signedness of struct stat's st_ino.
  *	1 for unsigned, -1 for signed.
  */
 #define ST_INO_SIGN 1	/* st_ino sign */
@@ -4647,7 +4631,7 @@
  *	you may need at least to reboot your OS to 64-bit mode.
  */
 #ifndef USE_64_BIT_INT
-/*#define	USE_64_BIT_INT		/ **/
+#define	USE_64_BIT_INT		/**/
 #endif
 #ifndef USE_64_BIT_ALL
 /*#define	USE_64_BIT_ALL		/ **/

@@ -6,11 +6,11 @@ WWW::Mechanize - Handy web browsing in a Perl object
 
 =head1 VERSION
 
-Version 1.70
+Version 1.75
 
 =cut
 
-our $VERSION = '1.72';
+our $VERSION = '1.75';
 
 =head1 SYNOPSIS
 
@@ -591,7 +591,8 @@ sub title {
 =head2 $mech->content(...)
 
 Returns the content that the mech uses internally for the last page
-fetched. Ordinarily this is the same as $mech->response()->content(),
+fetched. Ordinarily this is the same as
+C<< $mech->response()->decoded_content() >>,
 but this may differ for HTML documents if L</update_html> is
 overloaded (in which case the value passed to the base-class
 implementation of same will be returned), and/or extra named arguments
@@ -603,31 +604,56 @@ are passed to I<content()>:
 
 Returns a text-only version of the page, with all HTML markup
 stripped. This feature requires I<HTML::TreeBuilder> to be installed,
-or a fatal error will be thrown.
+or a fatal error will be thrown. This works only if the contents are
+HTML.
 
 =item I<< $mech->content( base_href => [$base_href|undef] ) >>
 
 Returns the HTML document, modified to contain a
 C<< <base href="$base_href"> >> mark-up in the header.
 I<$base_href> is C<< $mech->base() >> if not specified. This is
-handy to pass the HTML to e.g. L<HTML::Display>.
+handy to pass the HTML to e.g. L<HTML::Display>. This works only if
+the contents are HTML.
+
+
+=item I<< $mech->content( raw => 1 ) >>
+
+Returns C<< $self->response()->content() >>, i.e. the raw contents from the
+response.
+
+=item I<< $mech->content( decoded_by_headers => 1 ) >>
+
+Returns the content after applying all C<Content-Encoding> headers but
+with not additional mangling.
+
+=item I<< $mech->content( charset => $charset ) >>
+
+Returns C<< $self->response()->decoded_content(charset => $charset) >>
+(see L<HTTP::Response> for details).
 
 =back
 
-Passing arguments to C<content()> if the current document is not
-HTML has no effect now (i.e. the return value is the same as
-C<< $self->response()->content() >>. This may change in the future,
-but will likely be backwards-compatible when it does.
+To preserve backwards compatibility, additional parameters will be
+ignored unless none of C<< raw | decoded_by_headers | charset >> is
+specified and the text is HTML, in which case an error will be triggered.
 
 =cut
 
 sub content {
     my $self = shift;
+    my %parms = @_;
+
     my $content = $self->{content};
-
-    if ( $self->is_html ) {
-        my %parms = @_;
-
+    if (delete $parms{raw}) {
+        $content = $self->response()->content();
+    }
+    elsif (delete $parms{decoded_by_headers}) {
+        $content = $self->response()->decoded_content(charset => 'none');
+    }
+    elsif (my $charset = delete $parms{charset}) {
+        $content = $self->response()->decoded_content(charset => $charset);
+    }
+    elsif ( $self->is_html ) {
         if ( exists $parms{base_href} ) {
             my $base_href = (delete $parms{base_href}) || $self->base;
             $content=~s/<head>/<head>\n<base href="$base_href">/i;
@@ -728,6 +754,14 @@ or
 
     $mech->follow_link( n => 3 );
 
+=item * the link with the url
+
+    $mech->follow_link( url => '/other/page' );
+
+or
+
+    $mech->follow_link( url => 'http://example.com/page' );
+
 =back
 
 Returns the result of the GET method (an HTTP::Response object) if
@@ -738,6 +772,7 @@ couldn't be found, returns undef.
 
 sub follow_link {
     my $self = shift;
+    $self->die( qq{Needs to get key-value pairs of parameters.} ) if @_ % 2;
     my %parms = ( n=>1, @_ );
 
     if ( $parms{n} eq 'all' ) {
@@ -2025,23 +2060,70 @@ sub stack_depth {
     return $self->{stack_depth};
 }
 
-=head2 $mech->save_content( $filename )
+=head2 $mech->save_content( $filename, %opts )
 
 Dumps the contents of C<< $mech->content >> into I<$filename>.
 I<$filename> will be overwritten.  Dies if there are any errors.
 
 If the content type does not begin with "text/", then the content
-is saved in binary mode.
+is saved in binary mode (i.e. C<binmode()> is set on the output
+filehandle).
+
+Additional arguments can be passed as I<key>/I<value> pairs:
+
+=over
+
+=item I<< $mech->save_content( $filename, binary => 1 ) >>
+
+Filehandle is set with C<binmode> to C<:raw> and contents are taken
+calling C<< $self->content(decoded_by_headers => 1) >>. Same as calling:
+
+    $mech->save_content( $filename, binmode => ':raw',
+                         decoded_by_headers => 1 );
+
+This I<should> be the safest way to save contents verbatim.
+
+=item I<< $mech->save_content( $filename, binmode => $binmode ) >>
+
+Filehandle is set to binary mode. If C<$binmode> begins with ':', it is
+passed as a parameter to C<binmode>:
+
+    binmode $fh, $binmode;
+
+otherwise the filehandle is set to binary mode if C<$binmode> is true:
+
+    binmode $fh;
+
+=item I<all other arguments>
+
+are passed as-is to C<< $mech->content(%opts) >>. In particular,
+C<decoded_by_headers> might come handy if you want to revert the effect
+of line compression performed by the web server but without further
+interpreting the contents (e.g. decoding it according to the charset).
+
+=back
 
 =cut
 
 sub save_content {
     my $self = shift;
     my $filename = shift;
+    my %opts = @_;
+    if (delete $opts{binary}) {
+        $opts{binmode} = ':raw';
+        $opts{decoded_by_headers} = 1;
+    }
 
     open( my $fh, '>', $filename ) or $self->die( "Unable to create $filename: $!" );
-    binmode $fh unless $self->content_type =~ m{^text/};
-    print {$fh} $self->content or $self->die( "Unable to write to $filename: $!" );
+    if ((my $binmode = delete($opts{binmode}) || '') || ($self->content_type() !~ m{^text/})) {
+        if (length($binmode) && (substr($binmode, 0, 1) eq ':')) {
+            binmode $fh, $binmode;
+        }
+        else {
+            binmode $fh;
+        }
+    }
+    print {$fh} $self->content(%opts) or $self->die( "Unable to write to $filename: $!" );
     close $fh or $self->die( "Unable to close $filename: $!" );
 
     return;
@@ -2054,14 +2136,27 @@ Prints a dump of the HTTP response headers for the most recent
 response.  If I<$fh> is not specified or is undef, it dumps to
 STDOUT.
 
-Unlike the rest of the dump_* methods, you cannot specify a filehandle
-to print to.
+Unlike the rest of the dump_* methods, $fh can be a scalar. It
+will be used as a file name.
 
 =cut
 
+sub _get_fh_default_stdout {
+    my $self = shift;
+    my $p = shift || '';
+    if ( !$p ) {
+        return \*STDOUT;
+    } elsif ( !ref($p) ) {
+        open my $fh, '>', $p or $self->die( "Unable to write to $p: $!" );;
+        return $fh;
+    } else {
+        return $p;
+    }
+}
+
 sub dump_headers {
     my $self = shift;
-    my $fh   = shift || \*STDOUT;
+    my $fh   = $self->_get_fh_default_stdout(shift);
 
     print {$fh} $self->response->headers_as_string;
 
@@ -2278,7 +2373,7 @@ supported.
 sub credentials {
     my $self = shift;
 
-    # The lastest LWP::UserAgent also supports 2 arguments,
+    # The latest LWP::UserAgent also supports 2 arguments,
     # in which case the first is host:port
     if (@_ == 4 || (@_ == 2 && $_[0] =~ /:\d+$/)) {
         return $self->SUPER::credentials(@_);
@@ -2316,7 +2411,7 @@ sub clear_credentials {
 
 =head1 INHERITED UNCHANGED LWP::UserAgent METHODS
 
-As a sublass of L<LWP::UserAgent>, WWW::Mechanize inherits all of
+As a subclass of L<LWP::UserAgent>, WWW::Mechanize inherits all of
 L<LWP::UserAgent>'s methods.  Many of which are overridden or
 extended. The following methods are inherited unchanged. View the
 L<LWP::UserAgent> documentation for their implementation descriptions.
@@ -2760,8 +2855,8 @@ __END__
 WWW::Mechanize is hosted at GitHub, though the bug tracker still
 lives at Google Code.
 
-Repository: https://github.com/bestpractical/www-mechanize/.  
-Bugs: http://code.google.com/p/www-mechanize/issues
+Repository: L<https://github.com/libwww-perl/WWW-Mechanize>.
+Bugs: L<http://code.google.com/p/www-mechanize/issues>.
 
 =head1 OTHER DOCUMENTATION
 
@@ -2825,7 +2920,7 @@ Mechanize distribution.
 
 =over 4
 
-=item * L<http://www-128.ibm.com/developerworks/linux/library/wa-perlsecure.html>
+=item * L<http://www.ibm.com/developerworks/linux/library/wa-perlsecure/>
 
 IBM article "Secure Web site access with Perl"
 
@@ -2862,7 +2957,7 @@ method existed at press time.
 
 WWW::Mechanize on the Perl Advent Calendar, by Mark Fowler.
 
-=item * L<http://www.linux-magazin.de/Artikel/ausgabe/2004/03/perl/perl.html>
+=item * L<http://www.linux-magazin.de/Ausgaben/2004/03/Datenruessel/%28language%29/ger-DE>
 
 Michael Schilli's article on Mech and L<WWW::Mechanize::Shell> for the
 German magazine I<Linux Magazin>.
@@ -2895,6 +2990,8 @@ Just like Mech, but using Microsoft Internet Explorer to do the work.
 
 =item * L<WWW::Mechanize::Cached>
 
+=item * L<WWW::Mechanize::Cached::GZip>
+
 =item * L<WWW::Mechanize::FormFiller>
 
 =item * L<WWW::Mechanize::Shell>
@@ -2908,6 +3005,8 @@ Just like Mech, but using Microsoft Internet Explorer to do the work.
 =item * L<WWW::SourceForge>
 
 =item * L<WWW::Yahoo::Groups>
+
+=item * L<WWW::Scripter>
 
 =back
 

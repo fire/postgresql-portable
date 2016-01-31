@@ -1,6 +1,6 @@
 package Method::Inliner;
 
-use strictures 1;
+use Moo::_strictures;
 use Text::Balanced qw(extract_bracketed);
 use Sub::Quote ();
 
@@ -38,7 +38,7 @@ sub inlinify {
         $body = "${me}, ".$body;
         $fixed .= $front.Sub::Quote::inlinify($code{$name}, $body);
       } else {
-	$fixed .= $front.$me.'->'.$name.$body;
+        $fixed .= $front.$me.'->'.$name.$body;
       }
       #warn $fixed; warn $rest;
       $copy = $rest;

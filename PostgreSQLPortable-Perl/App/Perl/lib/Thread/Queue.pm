@@ -3,7 +3,7 @@ package Thread::Queue;
 use strict;
 use warnings;
 
-our $VERSION = '3.02';
+our $VERSION = '3.07';
 $VERSION = eval $VERSION;
 
 use threads::shared 1.21;
@@ -11,9 +11,6 @@ use Scalar::Util 1.10 qw(looks_like_number blessed reftype refaddr);
 
 # Carp errors from threads::shared calls should complain about caller
 our @CARP_NOT = ("threads::shared");
-
-# Predeclarations for internal functions
-my ($validate_count, $validate_index, $validate_timeout);
 
 # Create a new queue possibly pre-populated with items
 sub new
@@ -29,12 +26,27 @@ sub enqueue
 {
     my $self = shift;
     lock(%$self);
+
     if ($$self{'ENDED'}) {
         require Carp;
         Carp::croak("'enqueue' method called on queue that has been 'end'ed");
     }
-    push(@{$$self{'queue'}}, map { shared_clone($_) } @_)
+
+    # Block if queue size exceeds any specified limit
+    my $queue = $$self{'queue'};
+    cond_wait(%$self) while ($$self{'LIMIT'} && (@$queue >= $$self{'LIMIT'}));
+
+    # Add items to queue, and then signal other threads
+    push(@$queue, map { shared_clone($_) } @_)
         and cond_signal(%$self);
+}
+
+# Set or return the max. size for a queue
+sub limit : lvalue
+{
+    my $self = shift;
+    lock(%$self);
+    $$self{'LIMIT'};
 }
 
 # Return a count of the number of items on a queue
@@ -50,7 +62,7 @@ sub pending
 sub end
 {
     my $self = shift;
-    lock $self;
+    lock(%$self);
     # No more data is coming
     $$self{'ENDED'} = 1;
     # Try to release at least one blocked thread
@@ -64,11 +76,11 @@ sub dequeue
     lock(%$self);
     my $queue = $$self{'queue'};
 
-    my $count = @_ ? $validate_count->(shift) : 1;
+    my $count = @_ ? $self->_validate_count(shift) : 1;
 
     # Wait for requisite number of items
     cond_wait(%$self) while ((@$queue < $count) && ! $$self{'ENDED'});
-    cond_signal(%$self) if ((@$queue > $count) || $$self{'ENDED'});
+    cond_signal(%$self) if ((@$queue >= $count) || $$self{'ENDED'});
 
     # If no longer blocking, try getting whatever is left on the queue
     return $self->dequeue_nb($count) if ($$self{'ENDED'});
@@ -89,7 +101,7 @@ sub dequeue_nb
     lock(%$self);
     my $queue = $$self{'queue'};
 
-    my $count = @_ ? $validate_count->(shift) : 1;
+    my $count = @_ ? $self->_validate_count(shift) : 1;
 
     # Return single item
     return shift(@$queue) if ($count == 1);
@@ -111,19 +123,19 @@ sub dequeue_timed
     my $queue = $$self{'queue'};
 
     # Timeout may be relative or absolute
-    my $timeout = @_ ? $validate_timeout->(shift) : -1;
+    my $timeout = @_ ? $self->_validate_timeout(shift) : -1;
     # Convert to an absolute time for use with cond_timedwait()
     if ($timeout < 32000000) {   # More than one year
         $timeout += time();
     }
 
-    my $count = @_ ? $validate_count->(shift) : 1;
+    my $count = @_ ? $self->_validate_count(shift) : 1;
 
     # Wait for requisite number of items, or until timeout
     while ((@$queue < $count) && ! $$self{'ENDED'}) {
         last if (! cond_timedwait(%$self, $timeout));
     }
-    cond_signal(%$self) if ((@$queue > $count) || $$self{'ENDED'});
+    cond_signal(%$self) if ((@$queue >= $count) || $$self{'ENDED'});
 
     # Get whatever we need off the queue if available
     return $self->dequeue_nb($count);
@@ -134,7 +146,7 @@ sub peek
 {
     my $self = shift;
     lock(%$self);
-    my $index = @_ ? $validate_index->(shift) : 0;
+    my $index = @_ ? $self->_validate_index(shift) : 0;
     return $$self{'queue'}[$index];
 }
 
@@ -151,7 +163,7 @@ sub insert
 
     my $queue = $$self{'queue'};
 
-    my $index = $validate_index->(shift);
+    my $index = $self->_validate_index(shift);
 
     return if (! @_);   # Nothing to insert
 
@@ -186,8 +198,8 @@ sub extract
     lock(%$self);
     my $queue = $$self{'queue'};
 
-    my $index = @_ ? $validate_index->(shift) : 0;
-    my $count = @_ ? $validate_count->(shift) : 1;
+    my $index = @_ ? $self->_validate_index(shift) : 0;
+    my $count = @_ ? $self->_validate_count(shift) : 1;
 
     # Support negative indices
     if ($index < 0) {
@@ -219,10 +231,12 @@ sub extract
     return @items;
 }
 
-### Internal Functions ###
+### Internal Methods ###
 
 # Check value of the requested index
-$validate_index = sub {
+sub _validate_index
+{
+    my $self = shift;
     my $index = shift;
 
     if (! defined($index) ||
@@ -231,7 +245,8 @@ $validate_index = sub {
     {
         require Carp;
         my ($method) = (caller(1))[3];
-        $method =~ s/Thread::Queue:://;
+        my $class_name = ref($self);
+        $method =~ s/$class_name\:://;
         $index = 'undef' if (! defined($index));
         Carp::croak("Invalid 'index' argument ($index) to '$method' method");
     }
@@ -240,7 +255,9 @@ $validate_index = sub {
 };
 
 # Check value of the requested count
-$validate_count = sub {
+sub _validate_count
+{
+    my $self = shift;
     my $count = shift;
 
     if (! defined($count) ||
@@ -250,7 +267,8 @@ $validate_count = sub {
     {
         require Carp;
         my ($method) = (caller(1))[3];
-        $method =~ s/Thread::Queue:://;
+        my $class_name = ref($self);
+        $method =~ s/$class_name\:://;
         $count = 'undef' if (! defined($count));
         Carp::croak("Invalid 'count' argument ($count) to '$method' method");
     }
@@ -259,7 +277,9 @@ $validate_count = sub {
 };
 
 # Check value of the requested timeout
-$validate_timeout = sub {
+sub _validate_timeout
+{
+    my $self = shift;
     my $timeout = shift;
 
     if (! defined($timeout) ||
@@ -267,7 +287,8 @@ $validate_timeout = sub {
     {
         require Carp;
         my ($method) = (caller(1))[3];
-        $method =~ s/Thread::Queue:://;
+        my $class_name = ref($self);
+        $method =~ s/$class_name\:://;
         $timeout = 'undef' if (! defined($timeout));
         Carp::croak("Invalid 'timeout' argument ($timeout) to '$method' method");
     }
@@ -283,7 +304,7 @@ Thread::Queue - Thread-safe queues
 
 =head1 VERSION
 
-This document describes Thread::Queue version 3.02
+This document describes Thread::Queue version 3.07
 
 =head1 SYNOPSIS
 
@@ -327,6 +348,9 @@ This document describes Thread::Queue version 3.02
     if (defined(my $item = $q->dequeue_timed(5))) {
         # Work on $item
     }
+
+    # Set a size for a queue
+    $q->limit = 5;
 
     # Get the second item in the queue without dequeuing anything
     my $item = $q->peek(1);
@@ -417,7 +441,7 @@ Adds a list of items onto the end of the queue.
 Removes the requested number of items (default is 1) from the head of the
 queue, and returns them.  If the queue contains fewer than the requested
 number of items, then the thread will be blocked until the requisite number
-of items are available (i.e., until other threads <enqueue> more items).
+of items are available (i.e., until other threads C<enqueue> more items).
 
 =item ->dequeue_nb()
 
@@ -447,13 +471,27 @@ L<cond_timedwait()|threads::shared/"cond_timedwait VARIABLE, ABS_TIMEOUT">.
 Fractional seconds (e.g., 2.5 seconds) are also supported (to the extent of
 the underlying implementation).
 
-If C<TIMEOUT> is missing, c<undef>, or less than or equal to 0, then this call
+If C<TIMEOUT> is missing, C<undef>, or less than or equal to 0, then this call
 behaves the same as C<dequeue_nb>.
 
 =item ->pending()
 
 Returns the number of items still in the queue.  Returns C<undef> if the queue
 has been ended (see below), and there are no more items in the queue.
+
+=item ->limit
+
+Sets the size of the queue.  If set, calls to C<enqueue()> will block until
+the number of pending items in the queue drops below the C<limit>.  The
+C<limit> does not prevent enqueuing items beyond that count:
+
+    my $q = Thread::Queue->new(1, 2);
+    $q->limit = 4;
+    $q->enqueue(3, 4, 5);   # Does not block
+    $q->enqueue(6);         # Blocks until at least 2 items are dequeued
+
+    my $size = $q->limit;   # Returns the current limit (may return 'undef')
+    $q->limit = 0;          # Queue size is now unlimited
 
 =item ->end()
 

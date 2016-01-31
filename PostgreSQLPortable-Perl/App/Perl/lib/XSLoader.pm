@@ -2,7 +2,7 @@
 
 package XSLoader;
 
-$VERSION = "0.16";
+$VERSION = "0.17";
 
 #use strict;
 
@@ -37,7 +37,7 @@ sub load {
     my $modpname = join('/',@modparts);
     my $c = @modparts;
     $modlibname =~ s,[\\/][^\\/]+$,, while $c--;    # Q&D basename
-    my $file = "$modlibname/auto/$modpname/$modfname.dll";
+    my $file = "$modlibname/auto/$modpname/$modfname.xs\.dll";
 
 #   print STDERR "XSLoader::load for $module ($file)\n" if $dl_debug;
 
@@ -108,7 +108,7 @@ XSLoader - Dynamically load C libraries into Perl code
 
 =head1 VERSION
 
-Version 0.15
+Version 0.17
 
 =head1 SYNOPSIS
 
@@ -164,7 +164,7 @@ If no C<$VERSION> was specified on the C<bootstrap> line, the last line becomes
 
     XSLoader::load 'YourPackage';
 
-If the call to C<load> is from the YourPackage, then that can be further
+If the call to C<load> is from C<YourPackage>, then that can be further
 simplified to
 
     XSLoader::load();
@@ -196,7 +196,7 @@ C<use XSLoader> by C<require>, so the compiler does not know that a function
 C<XSLoader::load()> is present.
 
 This boilerplate uses the low-overhead C<XSLoader> if present; if used with
-an antic Perl which has no C<XSLoader>, it falls back to using C<DynaLoader>.
+an antique Perl which has no C<XSLoader>, it falls back to using C<DynaLoader>.
 
 =head1 Order of initialization: early load()
 

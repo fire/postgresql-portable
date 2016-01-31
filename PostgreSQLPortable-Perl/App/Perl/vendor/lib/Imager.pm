@@ -6,6 +6,7 @@ use IO::File;
 use Scalar::Util;
 use Imager::Color;
 use Imager::Font;
+use Config;
 
 @EXPORT_OK = qw(
 		init
@@ -143,7 +144,7 @@ BEGIN {
   if ($ex_version < 5.57) {
     @ISA = qw(Exporter);
   }
-  $VERSION = '0.94';
+  $VERSION = '1.004';
   require XSLoader;
   XSLoader::load(Imager => $VERSION);
 }
@@ -203,10 +204,16 @@ BEGIN {
      callsub => sub { my %hsh=@_; i_hardinvertall($hsh{image}); }
     };
 
-  $filters{autolevels} ={
+  $filters{autolevels_skew} ={
 			 callseq => ['image','lsat','usat','skew'],
 			 defaults => { lsat=>0.1,usat=>0.1,skew=>0.0 },
 			 callsub => sub { my %hsh=@_; i_autolevels($hsh{image},$hsh{lsat},$hsh{usat},$hsh{skew}); }
+			};
+
+  $filters{autolevels} ={
+			 callseq => ['image','lsat','usat'],
+			 defaults => { lsat=>0.1,usat=>0.1 },
+			 callsub => sub { my %hsh=@_; i_autolevels_mono($hsh{image},$hsh{lsat},$hsh{usat}); }
 			};
 
   $filters{turbnoise} ={
@@ -423,7 +430,7 @@ BEGIN {
 # Non methods
 #
 
-# initlize Imager
+# initialize Imager
 # NOTE: this might be moved to an import override later on
 
 sub import {
@@ -519,6 +526,12 @@ END {
 sub load_plugin {
   my ($filename)=@_;
   my $i;
+
+  if ($^O eq 'android') {
+    require File::Spec;
+    $filename = File::Spec->rel2abs($filename);
+  }
+
   my ($DSO_handle,$str)=DSO_open($filename);
   if (!defined($DSO_handle)) { $Imager::ERRSTR="Couldn't load plugin '$filename'\n"; return undef; }
   my %funcs=DSO_funclist($DSO_handle);
@@ -541,6 +554,11 @@ sub load_plugin {
 
 sub unload_plugin {
   my ($filename)=@_;
+
+  if ($^O eq 'android') {
+    require File::Spec;
+    $filename = File::Spec->rel2abs($filename);
+  }
 
   if (!$DSOs{$filename}) { $ERRSTR="plugin '$filename' not loaded."; return undef; }
   my ($DSO_handle,$funcref)=@{$DSOs{$filename}};
@@ -653,18 +671,13 @@ sub new {
   $self->{ERRSTR}=undef; #
   $self->{DEBUG}=$DEBUG;
   $self->{DEBUG} and print "Initialized Imager\n";
-  if (defined $hsh{xsize} || defined $hsh{ysize}) { 
-    unless ($self->img_set(%hsh)) {
-      $Imager::ERRSTR = $self->{ERRSTR};
-      return;
-    }
-  }
-  elsif (defined $hsh{file} || 
-	 defined $hsh{fh} ||
-	 defined $hsh{fd} ||
-	 defined $hsh{callback} ||
-	 defined $hsh{readcb} ||
-	 defined $hsh{data}) {
+  if (defined $hsh{file} ||
+      defined $hsh{fh} ||
+      defined $hsh{fd} ||
+      defined $hsh{callback} ||
+      defined $hsh{readcb} ||
+      defined $hsh{data} ||
+      defined $hsh{io}) {
     # allow $img = Imager->new(file => $filename)
     my %extras;
     
@@ -677,6 +690,16 @@ sub new {
       $Imager::ERRSTR = $self->{ERRSTR};
       return;
     }
+  }
+  elsif (defined $hsh{xsize} || defined $hsh{ysize}) {
+    unless ($self->img_set(%hsh)) {
+      $Imager::ERRSTR = $self->{ERRSTR};
+      return;
+    }
+  }
+  elsif (%hsh) {
+    Imager->_set_error("new: supply xsize and ysize or a file access parameter or no parameters");
+    return;
   }
 
   return $self;
@@ -893,16 +916,29 @@ sub _sametype {
 # Sets an image to a certain size and channel number
 # if there was previously data in the image it is discarded
 
+my %model_channels =
+  (
+   gray => 1,
+   graya => 2,
+   rgb => 3,
+   rgba => 4,
+  );
+
 sub img_set {
   my $self=shift;
 
   my %hsh=(xsize=>100, ysize=>100, channels=>3, bits=>8, type=>'direct', @_);
 
-  if (defined($self->{IMG})) {
-    # let IIM_DESTROY destroy it, it's possible this image is
-    # referenced from a virtual image (like masked)
-    #i_img_destroy($self->{IMG});
-    undef($self->{IMG});
+  undef($self->{IMG});
+
+  if ($hsh{model}) {
+    if (my $channels = $model_channels{$hsh{model}}) {
+      $hsh{channels} = $channels;
+    }
+    else {
+      $self->_set_error("new: unknown value for model '$hsh{model}'");
+      return;
+    }
   }
 
   if ($hsh{type} eq 'paletted' || $hsh{type} eq 'pseudo') {
@@ -921,7 +957,7 @@ sub img_set {
   }
 
   unless ($self->{IMG}) {
-    $self->{ERRSTR} = Imager->_error_as_msg();
+    $self->_set_error(Imager->_error_as_msg());
     return;
   }
 
@@ -1350,12 +1386,11 @@ sub _get_reader_io {
     return io_new_fd($input->{fd});
   }
   elsif ($input->{fh}) {
-    my $fd = fileno($input->{fh});
-    unless (defined $fd) {
+    unless (Scalar::Util::openhandle($input->{fh})) {
       $self->_set_error("Handle in fh option not opened");
       return;
     }
-    return io_new_fd($fd);
+    return Imager::IO->new_fh($input->{fh});
   }
   elsif ($input->{file}) {
     my $file = IO::File->new($input->{file}, "r");
@@ -1405,17 +1440,11 @@ sub _get_writer_io {
     $io = io_new_fd($input->{fd});
   }
   elsif ($input->{fh}) {
-    my $fd = fileno($input->{fh});
-    unless (defined $fd) {
+    unless (Scalar::Util::openhandle($input->{fh})) {
       $self->_set_error("Handle in fh option not opened");
       return;
     }
-    # flush it
-    my $oldfh = select($input->{fh});
-    # flush anything that's buffered, and make sure anything else is flushed
-    $| = 1;
-    select($oldfh);
-    $io = io_new_fd($fd);
+    $io = Imager::IO->new_fh($input->{fh});
   }
   elsif ($input->{file}) {
     my $fh = new IO::File($input->{file},"w+");
@@ -2883,8 +2912,14 @@ sub arc {
 	  return;
 	}
       }
-      i_arc_aa_cfill($self->{IMG},$opts{'x'},$opts{'y'},$opts{'r'},$opts{'d1'},
-		     $opts{'d2'}, $opts{fill}{fill});
+      if ($opts{d1} == 0 && $opts{d2} == 361) {
+	i_circle_aa_fill($self->{IMG}, $opts{'x'}, $opts{'y'}, $opts{'r'},
+			 $opts{fill}{fill});
+      }
+      else {
+	i_arc_aa_cfill($self->{IMG},$opts{'x'},$opts{'y'},$opts{'r'},$opts{'d1'},
+		       $opts{'d2'}, $opts{fill}{fill});
+      }
     }
     elsif ($opts{filled}) {
       my $color = _color($opts{'color'});
@@ -3047,6 +3082,8 @@ sub polygon {
     $self->{ERRSTR} = 'no points array, or x and y arrays.'; return undef;
   }
 
+  my $mode = _first($opts{mode}, 0);
+
   if ($opts{'fill'}) {
     unless (UNIVERSAL::isa($opts{'fill'}, 'Imager::Fill')) {
       # assume it's a hash ref
@@ -3056,8 +3093,8 @@ sub polygon {
         return undef;
       }
     }
-    i_poly_aa_cfill($self->{IMG}, $opts{'x'}, $opts{'y'}, 
-                    $opts{'fill'}{'fill'});
+    i_poly_aa_cfill_m($self->{IMG}, $opts{'x'}, $opts{'y'}, 
+                    $mode, $opts{'fill'}{'fill'});
   }
   else {
     my $color = _color($opts{'color'});
@@ -3065,12 +3102,73 @@ sub polygon {
       $self->{ERRSTR} = $Imager::ERRSTR; 
       return; 
     }
-    i_poly_aa($self->{IMG}, $opts{'x'}, $opts{'y'}, $color);
+    i_poly_aa_m($self->{IMG}, $opts{'x'}, $opts{'y'}, $mode, $color);
   }
 
   return $self;
 }
 
+sub polypolygon {
+  my ($self, %opts) = @_;
+
+  $self->_valid_image("polypolygon")
+    or return;
+
+  my $points = $opts{points};
+  $points
+    or return $self->_set_error("polypolygon: missing required points");
+
+  my $mode = _first($opts{mode}, "evenodd");
+
+  if ($opts{filled}) {
+    my $color = _color(_first($opts{color}, [ 0, 0, 0, 0 ]))
+      or return $self->_set_error($Imager::ERRSTR);
+
+    i_poly_poly_aa($self->{IMG}, $points, $mode, $color)
+      or return $self->_set_error($self->_error_as_msg);
+  }
+  elsif ($opts{fill}) {
+    my $fill = $opts{fill};
+    $self->_valid_fill($fill, "polypolygon")
+      or return;
+
+    i_poly_poly_aa_cfill($self->{IMG}, $points, $mode, $fill->{fill})
+      or return $self->_set_error($self->_error_as_msg);
+  }
+  else {
+    my $color = _color(_first($opts{color}, [ 0, 0, 0, 255 ]))
+      or return $self->_set_error($Imager::ERRSTR);
+
+    my $rimg = $self->{IMG};
+
+    if (_first($opts{aa}, 1)) {
+      for my $poly (@$points) {
+	my $xp = $poly->[0];
+	my $yp = $poly->[1];
+	for my $i (0 .. $#$xp - 1) {
+	  i_line_aa($rimg, $xp->[$i], $yp->[$i], $xp->[$i+1], $yp->[$i+1],
+		    $color, 0);
+	}
+	i_line_aa($rimg, $xp->[$#$xp], $yp->[$#$yp], $xp->[0], $yp->[0],
+		  $color, 0);
+      }
+    }
+    else {
+      for my $poly (@$points) {
+	my $xp = $poly->[0];
+	my $yp = $poly->[1];
+	for my $i (0 .. $#$xp - 1) {
+	  i_line($rimg, $xp->[$i], $yp->[$i], $xp->[$i+1], $yp->[$i+1],
+		 $color, 0);
+	}
+	i_line($rimg, $xp->[$#$xp], $yp->[$#$yp], $xp->[0], $yp->[0],
+	       $color, 0);
+      }
+    }
+  }
+
+  return $self;
+}
 
 # this the multipoint bezier curve
 # this is here more for testing that actual usage since
@@ -3248,15 +3346,15 @@ sub setpixel {
   else {
     if ($color->isa('Imager::Color')) {
       i_ppix($self->{IMG}, $x, $y, $color)
-	and return;
+	and return "0 but true";
     }
     else {
       i_ppixf($self->{IMG}, $x, $y, $color)
-	and return;
+	and return "0 but true";
     }
-  }
 
-  return $self;
+    return 1;
+  }
 }
 
 sub getpixel {
@@ -3821,6 +3919,37 @@ sub getchannels {
   return i_img_getchannels($self->{IMG});
 }
 
+my @model_names = qw(unknown gray graya rgb rgba);
+
+sub colormodel {
+  my ($self, %opts) = @_;
+
+  $self->_valid_image("colormodel")
+    or return;
+
+  my $model = i_img_color_model($self->{IMG});
+
+  return $opts{numeric} ? $model : $model_names[$model];
+}
+
+sub colorchannels {
+  my ($self) = @_;
+
+  $self->_valid_image("colorchannels")
+    or return;
+
+  return i_img_color_channels($self->{IMG});
+}
+
+sub alphachannel {
+  my ($self) = @_;
+
+  $self->_valid_image("alphachannel")
+    or return;
+
+  return scalar(i_img_alpha_channel($self->{IMG}));
+}
+
 # Get channel mask
 
 sub getmask {
@@ -4185,7 +4314,8 @@ sub parseiptc {
 }
 
 sub Inline {
-  my ($lang) = @_;
+  # Inline added a new argument at the beginning
+  my $lang = $_[-1];
 
   $lang eq 'C'
     or die "Only C language supported";
@@ -4213,6 +4343,49 @@ sub preload {
   eval { require Imager::Font::W32 };
   eval { require Imager::Font::FT2 };
   eval { require Imager::Font::T1 };
+  eval { require Imager::Color::Table };
+
+  1;
+}
+
+package Imager::IO;
+use IO::Seekable;
+
+sub new_fh {
+  my ($class, $fh) = @_;
+
+  if (tied(*$fh)) {
+    return $class->new_cb
+      (
+       sub {
+	 local $\;
+
+	 return print $fh $_[0];
+       },
+       sub {
+	 my $tmp;
+	 my $count = CORE::read $fh, $tmp, $_[1];
+	 defined $count
+	   or return undef;
+	 $count
+	   or return "";
+	 return $tmp;
+       },
+       sub {
+	 if ($_[1] != SEEK_CUR || $_[0] != 0) {
+	   unless (CORE::seek $fh, $_[0], $_[1]) {
+	     return -1;
+	   }
+	 }
+
+	 return tell $fh;
+       },
+       undef,
+      );
+  }
+  else {
+    return $class->_new_perlio($fh);
+  }
 }
 
 # backward compatibility for %formats
@@ -4389,6 +4562,10 @@ Overview.
 
 =item *
 
+L<Imager::Install> - installation notes for Imager.
+
+=item *
+
 L<Imager::Tutorial> - a brief introduction to Imager.
 
 =item *
@@ -4452,6 +4629,10 @@ L<Imager::Matrix2d> - Helper class for affine transformations.
 =item *
 
 L<Imager::Fountain> - Helper for making gradient profiles.
+
+=item *
+
+L<Imager::IO> - Imager I/O abstraction.
 
 =item *
 
@@ -4539,6 +4720,9 @@ addtag() -  L<Imager::ImageTypes/addtag()> - add image tags
 align_string() - L<Imager::Draw/align_string()> - draw text aligned on a
 point
 
+alphachannel() - L<Imager::ImageTypes/alphachannel()> - return the
+channel index of the alpha channel (if any).
+
 arc() - L<Imager::Draw/arc()> - draw a filled arc
 
 bits() - L<Imager::ImageTypes/bits()> - number of bits per sample for the
@@ -4553,8 +4737,14 @@ circle() - L<Imager::Draw/circle()> - draw a filled circle
 close_log() - L<Imager::ImageTypes/close_log()> - close the Imager
 debugging log.
 
+colorchannels() - L<Imager::ImageTypes/colorchannels()> - the number
+of channels used for color.
+
 colorcount() - L<Imager::ImageTypes/colorcount()> - the number of
 colors in an image's palette (paletted images only)
+
+colormodel() - L<Imager::ImageTypes/colorcount()> - how color is
+represented.
 
 combine() - L<Imager::Transformations/combine()> - combine channels
 from one or more images.
@@ -4686,6 +4876,8 @@ image
 polygon() - L<Imager::Draw/polygon()>
 
 polyline() - L<Imager::Draw/polyline()>
+
+polypolygon() - L<Imager::Draw/polypolygon()>
 
 preload() - L<Imager::Files/preload()>
 
@@ -5011,17 +5203,19 @@ To browse Imager's git repository:
 
   http://git.imager.perl.org/imager.git
 
-or:
-
-  https://github.com/tonycoz/imager
-
 To clone:
 
   git clone git://git.imager.perl.org/imager.git
 
-or:
+My preference is that patches are provided in the format produced by
+C<git format-patch>, for example, if you made your changes in a branch
+from master you might do:
 
-  git clone git://github.com/tonycoz/imager.git
+  git format-patch -k --stdout master >my-patch.txt
+
+and then attach that to your bug report, either by adding it as an
+attachment in your email client, or by using the Request Tracker
+attachment mechanism.
 
 =head1 AUTHOR
 
@@ -5058,7 +5252,8 @@ L<Affix::Infix2Postfix>(3), L<Parse::RecDescent>(3)
 
 Other perl imaging modules include:
 
-L<GD>(3), L<Image::Magick>(3), L<Graphics::Magick>(3),
+L<GD>(3), L<Image::Magick>(3),
+L<Graphics::Magick|http://www.graphicsmagick.org/perl.html>(3),
 L<Prima::Image>, L<IPA>.
 
 For manipulating image metadata see L<Image::ExifTool>.

@@ -12,7 +12,7 @@ use File::Spec::Functions qw(catfile catdir splitdir);
 use vars qw($VERSION @Pagers $Bindir $Pod2man
   $Temp_Files_Created $Temp_File_Lifetime
 );
-$VERSION = '3.19';
+$VERSION = '3.25';
 
 #..........................................................................
 
@@ -90,12 +90,13 @@ $Pod2man = "pod2man" . ( $Config{'versiononly'} ? $Config{'version'} : '' );
 #
 # Option accessors...
 
-foreach my $subname (map "opt_$_", split '', q{mhlDriFfXqnTdULv}) {
+foreach my $subname (map "opt_$_", split '', q{mhlDriFfXqnTdULva}) {
   no strict 'refs';
   *$subname = do{ use strict 'refs';  sub () { shift->_elem($subname, @_) } };
 }
 
 # And these are so that GetOptsOO knows they take options:
+sub opt_a_with { shift->_elem('opt_a', @_) }
 sub opt_f_with { shift->_elem('opt_f', @_) }
 sub opt_q_with { shift->_elem('opt_q', @_) }
 sub opt_d_with { shift->_elem('opt_d', @_) }
@@ -293,6 +294,7 @@ Options:
     -X   Use index if present (looks for pod.idx at $Config{archlib})
     -q   Search the text of questions (not answers) in perlfaq[1-9]
     -f   Search Perl built-in functions
+    -a   Search Perl API
     -v   Search predefined Perl variables
 
 PageName|ModuleName|ProgramName|URL...
@@ -399,6 +401,7 @@ Examples:
     $program_name -f PerlFunc
     $program_name -q FAQKeywords
     $program_name -v PerlVar
+    $program_name -a PerlAPI
 
 The -h option prints more help.  Also try "$program_name perldoc" to get
 acquainted with the system.                        [Perldoc v$VERSION]
@@ -429,6 +432,16 @@ sub init {
   # Make sure creat()s are neither too much nor too little
   eval { umask(0077) };   # doubtless someone has no mask
 
+  if ( $] < 5.008 ) {
+      $self->aside("Your old perl doesn't have proper unicode support.");
+    }
+  else {
+      # http://www.perl.com/pub/2012/04/perlunicookbook-decode-argv-as-utf8.html
+      # Decode command line arguments as UTF-8. See RT#98906 for example problem.
+      use Encode qw(decode_utf8);
+      @ARGV = map { decode_utf8($_, 1) } @ARGV;
+    }
+
   $self->{'args'}              ||= \@ARGV;
   $self->{'found'}             ||= [];
   $self->{'temp_file_list'}    ||= [];
@@ -441,6 +454,7 @@ sub init {
   $self->{'pagers' } = [@Pagers] unless exists $self->{'pagers'};
   $self->{'bindir' } = $Bindir   unless exists $self->{'bindir'};
   $self->{'pod2man'} = $Pod2man  unless exists $self->{'pod2man'};
+  $self->{'search_path'} = [ ]   unless exists $self->{'search_path'};
 
   push @{ $self->{'formatter_switches'} = [] }, (
    # Yeah, we could use a hashref, but maybe there's some class where options
@@ -470,7 +484,7 @@ sub init_formatter_class_list {
 
   $self->opt_M_with('Pod::Perldoc::ToPod');   # the always-there fallthru
   $self->opt_o_with('text');
-  $self->opt_o_with('man') unless $self->is_mswin32 || $self->is_dos
+  $self->opt_o_with('term') unless $self->is_mswin32 || $self->is_dos
        || !($ENV{TERM} && (
               ($ENV{TERM} || '') !~ /dumb|emacs|none|unknown/i
            ));
@@ -502,10 +516,10 @@ sub process {
     #  such as perlfaq".
 
     return $self->usage_brief  unless  @{ $self->{'args'} };
-    $self->pagers_guessing;
     $self->options_reading;
+    $self->pagers_guessing;
     $self->aside(sprintf "$0 => %s v%s\n", ref($self), $self->VERSION);
-    $self->drop_privs_maybe;
+    $self->drop_privs_maybe unless $self->opt_U;
     $self->options_processing;
 
     # Hm, we have @pages and @found, but we only really act on one
@@ -519,6 +533,7 @@ sub process {
     if(    $self->opt_f) { @pages = qw(perlfunc perlop)        }
     elsif( $self->opt_q) { @pages = ("perlfaq1" .. "perlfaq9") }
     elsif( $self->opt_v) { @pages = ("perlvar")                }
+    elsif( $self->opt_a) { @pages = ("perlapi")                }
     else                 { @pages = @{$self->{'args'}};
                            # @pages = __FILE__
                            #  if @pages == 1 and $pages[0] eq 'perldoc';
@@ -529,7 +544,7 @@ sub process {
     $self->find_good_formatter_class();
     $self->formatter_sanity_check();
 
-    $self->maybe_diddle_INC();
+    $self->maybe_extend_searchpath();
       # for when we're apparently in a module or extension directory
 
     my @found = $self->grand_search_init(\@pages);
@@ -596,7 +611,7 @@ sub find_good_formatter_class {
       } else {
         $^W = 0;
         # The average user just has no reason to be seeing
-        #  $^W-suppressible warnings from the the require!
+        #  $^W-suppressible warnings from the require!
       }
 
       eval "require $c";
@@ -795,8 +810,12 @@ sub options_sanity {
     # Any sanity-checking need doing here?
 
     # But does not make sense to set either -f or -q in $ENV{"PERLDOC"}
-    if( $self->opt_f or $self->opt_q ) {
-    $self->usage("Only one of -f -or -q") if $self->opt_f and $self->opt_q;
+    if( $self->opt_f or $self->opt_q or $self->opt_a) {
+    my $count;
+    $count++ if $self->opt_f;
+    $count++ if $self->opt_q;
+    $count++ if $self->opt_a;
+    $self->usage("Only one of -f or -q or -a") if $count > 1;
     $self->warn(
         "Perldoc is meant for reading one file at a time.\n",
         "So these parameters are being ignored: ",
@@ -858,7 +877,7 @@ sub grand_search_init {
 
         # We must look both in @INC for library modules and in $bindir
         # for executables, like h2xs or perldoc itself.
-        push @searchdirs, ($self->{'bindir'}, @INC);
+        push @searchdirs, ($self->{'bindir'}, @{$self->{search_path}}, @INC);
         unless ($self->opt_m) {
             if ($self->is_vms) {
                 my($i,$trn);
@@ -916,22 +935,28 @@ sub maybe_generate_dynamic_pod {
     my($self, $found_things) = @_;
     my @dynamic_pod;
 
+    $self->search_perlapi($found_things, \@dynamic_pod)   if  $self->opt_a;
+
     $self->search_perlfunc($found_things, \@dynamic_pod)  if  $self->opt_f;
 
     $self->search_perlvar($found_things, \@dynamic_pod)   if  $self->opt_v;
 
     $self->search_perlfaqs($found_things, \@dynamic_pod)  if  $self->opt_q;
 
-    if( ! $self->opt_f and ! $self->opt_q and ! $self->opt_v ) {
+    if( ! $self->opt_f and ! $self->opt_q and ! $self->opt_v and ! $self->opt_a) {
         DEBUG > 4 and print "That's a non-dynamic pod search.\n";
     } elsif ( @dynamic_pod ) {
         $self->aside("Hm, I found some Pod from that search!\n");
         my ($buffd, $buffer) = $self->new_tempfile('pod', 'dyn');
+        if ( $] >= 5.008 && $self->opt_L ) {
+            binmode($buffd, ":encoding(UTF-8)");
+            print $buffd "=encoding utf8\n\n";
+        }
 
         push @{ $self->{'temp_file_list'} }, $buffer;
          # I.e., it MIGHT be deleted at the end.
 
-        my $in_list = !$self->not_dynamic && $self->opt_f || $self->opt_v;
+        my $in_list = !$self->not_dynamic && $self->opt_f || $self->opt_v || $self->opt_a;
 
         print $buffd "=over 8\n\n" if $in_list;
         print $buffd @dynamic_pod  or $self->die( "Can't print $buffer: $!" );
@@ -1013,6 +1038,33 @@ sub add_translator { # $self->add_translator($lang);
 
 #..........................................................................
 
+sub open_fh {
+    my ($self, $op, $path) = @_;
+
+    open my $fh, $op, $path or $self->die("Couldn't open $path: $!");
+    return $fh;
+}
+
+sub set_encoding {
+    my ($self, $fh, $encoding) = @_;
+
+    if ( $encoding =~ /utf-?8/i ) {
+        $encoding = ":encoding(UTF-8)";
+    }
+    else {
+        $encoding = ":encoding($encoding)";
+    }
+
+    if ( $] < 5.008 ) {
+        $self->aside("Your old perl doesn't have proper unicode support.");
+    }
+    else {
+        binmode($fh, $encoding);
+    }
+
+    return $fh;
+}
+
 sub search_perlvar {
     my($self, $found_things, $pod) = @_;
 
@@ -1025,8 +1077,7 @@ sub search_perlvar {
     DEBUG > 2 and print "Search: @$found_things\n";
 
     my $perlvar = shift @$found_things;
-    open(PVAR, "<", $perlvar)               # "Funk is its own reward"
-        or $self->die("Can't open $perlvar: $!");
+    my $fh = $self->open_fh("<", $perlvar);
 
     if ( $opt ne '$0' && $opt =~ /^\$\d+$/ ) { # handle $1, $2, ...
       $opt = '$<I<digits>>';
@@ -1038,15 +1089,19 @@ sub search_perlvar {
 
     # Skip introduction
     local $_;
-    while (<PVAR>) {
+    my $enc;
+    while (<$fh>) {
+        $enc = $1 if /^=encoding\s+(\S+)/;
         last if /^=over 8/;
     }
+
+    $fh = $self->set_encoding($fh, $enc) if $enc;
 
     # Look for our variable
     my $found = 0;
     my $inheader = 1;
     my $inlist = 0;
-    while (<PVAR>) {  # "The Mothership Connection is here!"
+    while (<$fh>) {  
         last if /^=head2 Error Indicators/;
         # \b at the end of $` and friends borks things!
         if ( m/^=item\s+$search_re\s/ )  {
@@ -1080,7 +1135,7 @@ sub search_perlvar {
     if (!@$pod) {
         CORE::die( "No documentation for perl variable '$opt' found\n" );
     }
-    close PVAR                or $self->die( "Can't open $perlvar: $!" );
+    close $fh                or $self->die( "Can't close $perlvar: $!" );
 
     return;
 }
@@ -1093,93 +1148,104 @@ sub search_perlop {
   $self->not_dynamic( 1 );
 
   my $perlop = shift @$found_things;
-  open( PERLOP, '<', $perlop ) or $self->die( "Can't open $perlop: $!" );
+  # XXX FIXME: getting filehandles should probably be done in a single place
+  # especially since we need to support UTF8 or other encoding when dealing
+  # with perlop, perlfunc, perlapi, perlfaq[1-9]
+  my $fh = $self->open_fh('<', $perlop);
 
-  my $paragraph = "";
-  my $has_text_seen = 0;
   my $thing = $self->opt_f;
-  my $list = 0;
 
-  while( my $line = <PERLOP> ){
-    if( $paragraph and $line =~ m!^=(?:head|item)! and $paragraph =~ m!X<+\s*\Q$thing\E\s*>+! ){
-      if( $list ){
-        $paragraph =~ s!=back.*?\z!!s;
-      }
+  my $previous_line;
+  my $push = 0;
+  my $seen_item = 0;
+  my $skip = 1;
 
-      if( $paragraph =~ m!^=item! ){
-        $paragraph = "=over 8\n\n" . $paragraph . "=back\n";
-      }
-
-      push @$pod, $paragraph;
-      $paragraph = "";
-      $has_text_seen = 0;
-      $list = 0;
+  while( my $line = <$fh> ) {
+    $line =~ /^=encoding\s+(\S+)/ && $self->set_encoding($fh, $1);
+    # only start search after we hit the operator section
+    if ($line =~ m!^X<operator, regexp>!) {
+        $skip = 0;
     }
 
-    if( $line =~ m!^=over! ){
-      $list++;
+    next if $skip;
+
+    # strategy is to capture the previous line until we get a match on X<$thingy>
+    # if the current line contains X<$thingy>, then we push "=over", the previous line, 
+    # the current line and keep pushing current line until we see a ^X<some-other-thing>, 
+    # then we chop off final line from @$pod and add =back
+    #
+    # At that point, Bob's your uncle.
+
+    if ( $line =~ m!X<+\s*\Q$thing\E\s*>+!) {
+        if ( $previous_line ) {
+            push @$pod, "=over 8\n\n", $previous_line;
+            $previous_line = "";
+        }
+        push @$pod, $line;
+        $push = 1;
+
     }
-    elsif( $line =~ m!^=back! ){
-      $list--;
+    elsif ( $push and $line =~ m!^=item\s*.*$! ) {
+        $seen_item = 1;
+    }
+    elsif ( $push and $seen_item and $line =~ m!^X<+\s*[ a-z,?-]+\s*>+!) {
+        $push = 0;
+        $seen_item = 0;
+        last;
+    }
+    elsif ( $push ) {
+        push @$pod, $line;
     }
 
-    if( $line =~ m!^=(?:head|item)! and $has_text_seen ){
-      $paragraph = "";
-    }
-    elsif( $line !~ m!^=(?:head|item)! and $line !~ m!^\s*$! and $line !~ m!^\s*X<! ){
-      $has_text_seen = 1;
+    else {
+        $previous_line = $line;
     }
 
-    $paragraph .= $line;
-    }
+  } #end while
 
-  close PERLOP;
+  # we overfilled by 1 line, so pop off final array element if we have any
+  if ( scalar @$pod ) {
+    pop @$pod;
+
+    # and add the =back
+    push @$pod, "\n\n=back\n";
+    DEBUG > 8 and print "PERLOP POD --->" . (join "", @$pod) . "<---\n";
+  }
+  else {
+    DEBUG > 4 and print "No pod from perlop\n";
+  }
+
+  close $fh;
 
   return;
 }
 
 #..........................................................................
 
-sub search_perlfunc {
+sub search_perlapi {
     my($self, $found_things, $pod) = @_;
 
     DEBUG > 2 and print "Search: @$found_things\n";
 
-    my $perlfunc = shift @$found_things;
-    open(PFUNC, "<", $perlfunc)               # "Funk is its own reward"
-        or $self->die("Can't open $perlfunc: $!");
+    my $perlapi = shift @$found_things;
+    my $fh = $self->open_fh('<', $perlapi);
 
-    # Functions like -r, -e, etc. are listed under `-X'.
-    my $search_re = ($self->opt_f =~ /^-[rwxoRWXOeszfdlpSbctugkTBMAC]$/)
-                        ? '(?:I<)?-X' : quotemeta($self->opt_f) ;
+    my $search_re = quotemeta($self->opt_a);
 
     DEBUG > 2 and
-     print "Going to perlfunc-scan for $search_re in $perlfunc\n";
+     print "Going to perlapi-scan for $search_re in $perlapi\n";
 
-    my $re = 'Alphabetical Listing of Perl Functions';
-
-    # Check available translator or backup to default (english)
-    if ( $self->opt_L && defined $self->{'translators'}->[0] ) {
-        my $tr = $self->{'translators'}->[0];
-        $re =  $tr->search_perlfunc_re if $tr->can('search_perlfunc_re');
-    }
-
-    # Skip introduction
     local $_;
-    while (<PFUNC>) {
-        last if /^=head2 $re/;
-    }
 
     # Look for our function
     my $found = 0;
     my $inlist = 0;
 
-    my @perlops = qw(m q qq qr qx qw s tr y);
-
     my @related;
     my $related_re;
-    while (<PFUNC>) {  # "The Mothership Connection is here!"
-        last if( grep{ $self->opt_f eq $_ }@perlops );
+    while (<$fh>) {
+        /^=encoding\s+(\S+)/ && $self->set_encoding($fh, $1);
+
         if ( m/^=item\s+$search_re\b/ )  {
             $found = 1;
         }
@@ -1210,6 +1276,100 @@ sub search_perlfunc {
         ++$found if /^\w/;        # found descriptive text
     }
 
+    if (!@$pod) {
+        CORE::die( sprintf
+          "No documentation for perl api function '%s' found\n",
+          $self->opt_a )
+        ;
+    }
+    close $fh                or $self->die( "Can't open $perlapi: $!" );
+
+    return;
+}
+
+#..........................................................................
+
+sub search_perlfunc {
+    my($self, $found_things, $pod) = @_;
+
+    DEBUG > 2 and print "Search: @$found_things\n";
+
+    my $pfunc = shift @$found_things;
+    my $fh = $self->open_fh("<", $pfunc); # "Funk is its own reward"
+
+    # Functions like -r, -e, etc. are listed under `-X'.
+    my $search_re = ($self->opt_f =~ /^-[rwxoRWXOeszfdlpSbctugkTBMAC]$/)
+                        ? '(?:I<)?-X' : quotemeta($self->opt_f) ;
+
+    DEBUG > 2 and
+     print "Going to perlfunc-scan for $search_re in $pfunc\n";
+
+    my $re = 'Alphabetical Listing of Perl Functions';
+
+    # Check available translator or backup to default (english)
+    if ( $self->opt_L && defined $self->{'translators'}->[0] ) {
+        my $tr = $self->{'translators'}->[0];
+        $re =  $tr->search_perlfunc_re if $tr->can('search_perlfunc_re');
+        if ( $] < 5.008 ) {
+            $self->aside("Your old perl doesn't really have proper unicode support.");
+        }
+    }
+
+    # Skip introduction
+    local $_;
+    while (<$fh>) {
+        /^=encoding\s+(\S+)/ && $self->set_encoding($fh, $1);
+        last if /^=head2 $re/;
+    }
+
+    # Look for our function
+    my $found = 0;
+    my $inlist = 0;
+
+    my @perlops = qw(m q qq qr qx qw s tr y);
+
+    my @related;
+    my $related_re;
+    while (<$fh>) {  # "The Mothership Connection is here!"
+        last if( grep{ $self->opt_f eq $_ }@perlops );
+
+        if ( /^=over/ and not $found ) {
+            ++$inlist;
+        }
+        elsif ( /^=back/ and not $found and $inlist ) {
+            --$inlist;
+        }
+
+
+        if ( m/^=item\s+$search_re\b/ and $inlist < 2 )  {
+            $found = 1;
+        }
+        elsif (@related > 1 and /^=item/) {
+            $related_re ||= join "|", @related;
+            if (m/^=item\s+(?:$related_re)\b/) {
+                $found = 1;
+            }
+            else {
+                last if $found > 1 and $inlist < 2;
+            }
+        }
+        elsif (/^=item/) {
+            last if $found > 1 and $inlist < 2;
+        }
+        elsif ($found and /^X<[^>]+>/) {
+            push @related, m/X<([^>]+)>/g;
+        }
+        next unless $found;
+        if (/^=over/) {
+            ++$inlist;
+        }
+        elsif (/^=back/) {
+            --$inlist;
+        }
+        push @$pod, $_;
+        ++$found if /^\w/;        # found descriptive text
+    }
+
     if( !@$pod ){
         $self->search_perlop( $found_things, $pod );
     }
@@ -1220,7 +1380,7 @@ sub search_perlfunc {
           $self->opt_f )
         ;
     }
-    close PFUNC                or $self->die( "Can't open $perlfunc: $!" );
+    close $fh                or $self->die( "Can't close $pfunc: $!" );
 
     return;
 }
@@ -1245,9 +1405,9 @@ EOD
     local $_;
     foreach my $file (@$found_things) {
         $self->die( "invalid file spec: $!" ) if $file =~ /[<>|]/;
-        open(INFAQ, "<", $file)  # XXX 5.6ism
-         or $self->die( "Can't read-open $file: $!\nAborting" );
-        while (<INFAQ>) {
+        my $fh = $self->open_fh("<", $file);
+        while (<$fh>) {
+            /^=encoding\s+(\S+)/ && $self->set_encoding($fh, $1);
             if ( m/^=head2\s+.*(?:$search_key)/i ) {
                 $found = 1;
                 push @$pod, "=head1 Found in $file\n\n" unless $found_in{$file}++;
@@ -1258,7 +1418,7 @@ EOD
             next unless $found;
             push @$pod, $_;
         }
-        close(INFAQ);
+        close($fh);
     }
     CORE::die("No documentation for perl FAQ keyword '$search_key' found\n")
      unless @$pod;
@@ -1482,6 +1642,9 @@ sub minus_f_nocase {   # i.e., do like -f, but without regard to case
 #..........................................................................
 
 sub pagers_guessing {
+    # TODO: This whole subroutine needs to be rewritten. It's semi-insane
+    # right now.
+
     my $self = shift;
 
     my @pagers;
@@ -1514,7 +1677,15 @@ sub pagers_guessing {
        }
     }
 
-    unshift @pagers, "$ENV{PERLDOC_PAGER} <" if $ENV{PERLDOC_PAGER};
+    if ( $self->opt_m ) {
+        unshift @pagers, "$ENV{PERLDOC_SRC_PAGER}" if $ENV{PERLDOC_SRC_PAGER}
+    }
+    else {
+        unshift @pagers, "$ENV{MANPAGER} <" if $ENV{MANPAGER};
+        unshift @pagers, "$ENV{PERLDOC_PAGER} <" if $ENV{PERLDOC_PAGER};
+    }
+
+    $self->aside("Pagers: ", @pagers);
 
     return;
 }
@@ -1590,9 +1761,9 @@ sub isprintable {
 
 	my $data;
 	local($_);
-	open(TEST,"<", $file)     or $self->die( "Can't open $file: $!" );
-	read TEST, $data, $size;
-	close TEST;
+	my $fh = $self->open_fh("<", $file);
+	read $fh, $data, $size;
+	close $fh;
 	$size= length($data);
 	$data =~ tr/\x09-\x0D\x20-\x7E//d;
 	return length($data) <= $size*$maxunprintfrac;
@@ -1625,32 +1796,31 @@ sub containspod {
     }
 
     local($_);
-    open(TEST,"<", $file)   or $self->die( "Can't open $file: $!" );   # XXX 5.6ism
-    while (<TEST>) {
+    my $fh = $self->open_fh("<", $file);
+    while (<$fh>) {
     if (/^=head/) {
-        close(TEST)     or $self->die( "Can't close $file: $!" );
+        close($fh)     or $self->die( "Can't close $file: $!" );
         return 1;
     }
     }
-    close(TEST)         or $self->die( "Can't close $file: $!" );
+    close($fh)         or $self->die( "Can't close $file: $!" );
     return 0;
 }
 
 #..........................................................................
 
-sub maybe_diddle_INC {
+sub maybe_extend_searchpath {
   my $self = shift;
 
   # Does this look like a module or extension directory?
 
   if (-f "Makefile.PL" || -f "Build.PL") {
 
-    # Add "." and "lib" to @INC (if they exist)
-    eval q{ use lib qw(. lib); 1; } or $self->die;
+    push @{$self->{search_path} }, '.','lib';
 
     # don't add if superuser
     if ($< && $> && -d "blib") {   # don't be looking too hard now!
-      eval q{ use blib; 1 };
+      push @{ $self->{search_path} }, 'blib';
       $self->warn( $@ ) if $@ && $self->opt_D;
     }
   }
@@ -1669,15 +1839,8 @@ sub new_output_file {
 
   # Otherwise open a write-handle on opt_d!f
 
-  my $fh;
-  # If we are running before perl5.6.0, we can't autovivify
-  if ($^V < 5.006) {
-    require Symbol;
-    $fh = Symbol::gensym();
-  }
   DEBUG > 3 and print "About to try writing to specified output file $outspec\n";
-  $self->die( "Can't write-open $outspec: $!" )
-   unless open($fh, ">", $outspec); # XXX 5.6ism
+  my $fh = $self->open_fh(">", $outspec);
 
   DEBUG > 3 and print "Successfully opened $outspec\n";
   binmode($fh) if $self->{'output_is_binary'};
@@ -1731,12 +1894,12 @@ sub page {  # apply a pager to the output file
     my ($self, $output, $output_to_stdout, @pagers) = @_;
     if ($output_to_stdout) {
         $self->aside("Sending unpaged output to STDOUT.\n");
-        open(TMP, "<", $output)  or  $self->die( "Can't open $output: $!" ); # XXX 5.6ism
+        my $fh = $self->open_fh("<", $output);
         local $_;
-        while (<TMP>) {
+        while (<$fh>) {
             print or $self->die( "Can't print to stdout: $!" );
         }
-        close TMP  or $self->die( "Can't close while $output: $!" );
+        close $fh or $self->die( "Can't close while $output: $!" );
         $self->unlink_if_temp_file($output);
     } else {
         # On VMS, quoting prevents logical expansion, and temp files with no
@@ -1754,6 +1917,9 @@ sub page {  # apply a pager to the output file
             if ($self->is_vms) {
                 last if system("$pager $output") == 0;
             } else {
+                # fix visible escape codes in ToTerm output
+                # https://bugs.debian.org/758689
+                local $ENV{LESS} = defined $ENV{LESS} ? "$ENV{LESS} -R" : "-R";
                 last if system("$pager \"$output\"") == 0;
             }
         }
@@ -1866,6 +2032,8 @@ sub is_tainted { # just a function
 
 sub drop_privs_maybe {
     my $self = shift;
+
+    DEBUG and print "Attempting to drop privs...\n";
 
     # Attempt to drop privs if we should be tainting and aren't
     if (!( $self->is_vms || $self->is_mswin32 || $self->is_dos

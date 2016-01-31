@@ -57,8 +57,7 @@ C:\strawberry\perl\vendor\lib\DBI\Util\CacheMemory.pm
 C:\strawberry\perl\vendor\lib\DBI\Util\_accessor.pm
 C:\strawberry\perl\vendor\lib\DBI\W32ODBC.pm
 C:\strawberry\perl\vendor\lib\Win32\DBIODBC.pm
-C:\strawberry\perl\vendor\lib\auto\DBI\DBI.bs
-C:\strawberry\perl\vendor\lib\auto\DBI\DBI.dll
+C:\strawberry\perl\vendor\lib\auto\DBI\DBI.xs.dll
 C:\strawberry\perl\vendor\lib\auto\DBI\DBIXS.h
 C:\strawberry\perl\vendor\lib\auto\DBI\Driver.xst
 C:\strawberry\perl\vendor\lib\auto\DBI\Driver_xst.h

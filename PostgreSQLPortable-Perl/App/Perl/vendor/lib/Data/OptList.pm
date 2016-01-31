@@ -1,8 +1,8 @@
 use strict;
 use warnings;
 package Data::OptList;
-BEGIN {
-  $Data::OptList::VERSION = '0.107';
+{
+  $Data::OptList::VERSION = '0.109';
 }
 # ABSTRACT: parse and validate simple name/value option pairs
 
@@ -106,7 +106,10 @@ BEGIN {
 1;
 
 __END__
+
 =pod
+
+=encoding UTF-8
 
 =head1 NAME
 
@@ -114,7 +117,7 @@ Data::OptList - parse and validate simple name/value option pairs
 
 =head1 VERSION
 
-version 0.107
+version 0.109
 
 =head1 SYNOPSIS
 
@@ -195,7 +198,7 @@ Valid arguments are:
 This produces an array of arrays; the inner arrays are name/value pairs.
 Values will be either "undef" or a reference.
 
-Positional parameters may be used for compability with the old C<mkopt>
+Positional parameters may be used for compatibility with the old C<mkopt>
 interface:
 
   my $opt_list = Data::OptList::mkopt($input, $moniker, $req_uni, $must_be);
@@ -253,4 +256,3 @@ This is free software; you can redistribute it and/or modify it under
 the same terms as the Perl 5 programming language system itself.
 
 =cut
-

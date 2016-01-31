@@ -1,137 +1,164 @@
-package Try::Tiny;
+package Try::Tiny; # git description: v0.23-3-g5ee27f1
+use 5.006;
+# ABSTRACT: minimal try/catch with proper preservation of $@
+
+our $VERSION = '0.24';
 
 use strict;
-#use warnings;
+use warnings;
 
-use vars qw(@EXPORT @EXPORT_OK $VERSION @ISA);
+use Exporter 5.57 'import';
+our @EXPORT = our @EXPORT_OK = qw(try catch finally);
+
+use Carp;
+$Carp::Internal{+__PACKAGE__}++;
 
 BEGIN {
-	require Exporter;
-	@ISA = qw(Exporter);
+  my $su = $INC{'Sub/Util.pm'} && defined &Sub::Util::set_subname;
+  my $sn = $INC{'Sub/Name.pm'} && eval { Sub::Name->VERSION(0.08) };
+  unless ($su || $sn) {
+    $su = eval { require Sub::Util; } && defined &Sub::Util::set_subname;
+    unless ($su) {
+      $sn = eval { require Sub::Name; Sub::Name->VERSION(0.08) };
+    }
+  }
+
+  *_subname = $su ? \&Sub::Util::set_subname
+            : $sn ? \&Sub::Name::subname
+            : sub { $_[1] };
+  *_HAS_SUBNAME = ($su || $sn) ? sub(){1} : sub(){0};
 }
-
-$VERSION = "0.12";
-
-$VERSION = eval $VERSION;
-
-@EXPORT = @EXPORT_OK = qw(try catch finally);
-
-$Carp::Internal{+__PACKAGE__}++;
 
 # Need to prototype as @ not $$ because of the way Perl evaluates the prototype.
 # Keeping it at $$ means you only ever get 1 sub because we need to eval in a list
 # context & not a scalar one
 
 sub try (&;@) {
-	my ( $try, @code_refs ) = @_;
+  my ( $try, @code_refs ) = @_;
 
-	# we need to save this here, the eval block will be in scalar context due
-	# to $failed
-	my $wantarray = wantarray;
+  # we need to save this here, the eval block will be in scalar context due
+  # to $failed
+  my $wantarray = wantarray;
 
-	my ( $catch, @finally );
+  # work around perl bug by explicitly initializing these, due to the likelyhood
+  # this will be used in global destruction (perl rt#119311)
+  my ( $catch, @finally ) = ();
 
-	# find labeled blocks in the argument list.
-	# catch and finally tag the blocks by blessing a scalar reference to them.
-	foreach my $code_ref (@code_refs) {
-		next unless $code_ref;
+  # find labeled blocks in the argument list.
+  # catch and finally tag the blocks by blessing a scalar reference to them.
+  foreach my $code_ref (@code_refs) {
 
-		my $ref = ref($code_ref);
+    if ( ref($code_ref) eq 'Try::Tiny::Catch' ) {
+      croak 'A try() may not be followed by multiple catch() blocks'
+        if $catch;
+      $catch = ${$code_ref};
+    } elsif ( ref($code_ref) eq 'Try::Tiny::Finally' ) {
+      push @finally, ${$code_ref};
+    } else {
+      croak(
+        'try() encountered an unexpected argument ('
+      . ( defined $code_ref ? $code_ref : 'undef' )
+      . ') - perhaps a missing semi-colon before or'
+      );
+    }
+  }
 
-		if ( $ref eq 'Try::Tiny::Catch' ) {
-			$catch = ${$code_ref};
-		} elsif ( $ref eq 'Try::Tiny::Finally' ) {
-			push @finally, ${$code_ref};
-		} else {
-			use Carp;
-			confess("Unknown code ref type given '${ref}'. Check your usage & try again");
-		}
-	}
+  # FIXME consider using local $SIG{__DIE__} to accumulate all errors. It's
+  # not perfect, but we could provide a list of additional errors for
+  # $catch->();
 
-	# save the value of $@ so we can set $@ back to it in the beginning of the eval
-	my $prev_error = $@;
+  # name the blocks if we have Sub::Name installed
+  my $caller = caller;
+  _subname("${caller}::try {...} " => $try)
+    if _HAS_SUBNAME;
 
-	my ( @ret, $error, $failed );
+  # save the value of $@ so we can set $@ back to it in the beginning of the eval
+  # and restore $@ after the eval finishes
+  my $prev_error = $@;
 
-	# FIXME consider using local $SIG{__DIE__} to accumulate all errors. It's
-	# not perfect, but we could provide a list of additional errors for
-	# $catch->();
+  my ( @ret, $error );
 
-	{
-		# localize $@ to prevent clobbering of previous value by a successful
-		# eval.
-		local $@;
+  # failed will be true if the eval dies, because 1 will not be returned
+  # from the eval body
+  my $failed = not eval {
+    $@ = $prev_error;
 
-		# failed will be true if the eval dies, because 1 will not be returned
-		# from the eval body
-		$failed = not eval {
-			$@ = $prev_error;
+    # evaluate the try block in the correct context
+    if ( $wantarray ) {
+      @ret = $try->();
+    } elsif ( defined $wantarray ) {
+      $ret[0] = $try->();
+    } else {
+      $try->();
+    };
 
-			# evaluate the try block in the correct context
-			if ( $wantarray ) {
-				@ret = $try->();
-			} elsif ( defined $wantarray ) {
-				$ret[0] = $try->();
-			} else {
-				$try->();
-			};
+    return 1; # properly set $failed to false
+  };
 
-			return 1; # properly set $fail to false
-		};
+  # preserve the current error and reset the original value of $@
+  $error = $@;
+  $@ = $prev_error;
 
-		# copy $@ to $error; when we leave this scope, local $@ will revert $@
-		# back to its previous value
-		$error = $@;
-	}
-
-	# set up a scope guard to invoke the finally block at the end
-	my @guards =
+  # set up a scope guard to invoke the finally block at the end
+  my @guards =
     map { Try::Tiny::ScopeGuard->_new($_, $failed ? $error : ()) }
     @finally;
 
-	# at this point $failed contains a true value if the eval died, even if some
-	# destructor overwrote $@ as the eval was unwinding.
-	if ( $failed ) {
-		# if we got an error, invoke the catch block.
-		if ( $catch ) {
-			# This works like given($error), but is backwards compatible and
-			# sets $_ in the dynamic scope for the body of C<$catch>
-			for ($error) {
-				return $catch->($error);
-			}
+  # at this point $failed contains a true value if the eval died, even if some
+  # destructor overwrote $@ as the eval was unwinding.
+  if ( $failed ) {
+    # if we got an error, invoke the catch block.
+    if ( $catch ) {
+      # This works like given($error), but is backwards compatible and
+      # sets $_ in the dynamic scope for the body of C<$catch>
+      for ($error) {
+        return $catch->($error);
+      }
 
-			# in case when() was used without an explicit return, the C<for>
-			# loop will be aborted and there's no useful return value
-		}
+      # in case when() was used without an explicit return, the C<for>
+      # loop will be aborted and there's no useful return value
+    }
 
-		return;
-	} else {
-		# no failure, $@ is back to what it was, everything is fine
-		return $wantarray ? @ret : $ret[0];
-	}
+    return;
+  } else {
+    # no failure, $@ is back to what it was, everything is fine
+    return $wantarray ? @ret : $ret[0];
+  }
 }
 
 sub catch (&;@) {
-	my ( $block, @rest ) = @_;
+  my ( $block, @rest ) = @_;
 
-	return (
-		bless(\$block, 'Try::Tiny::Catch'),
-		@rest,
-	);
+  croak 'Useless bare catch()' unless wantarray;
+
+  my $caller = caller;
+  _subname("${caller}::catch {...} " => $block)
+    if _HAS_SUBNAME;
+  return (
+    bless(\$block, 'Try::Tiny::Catch'),
+    @rest,
+  );
 }
 
 sub finally (&;@) {
-	my ( $block, @rest ) = @_;
+  my ( $block, @rest ) = @_;
 
-	return (
-		bless(\$block, 'Try::Tiny::Finally'),
-		@rest,
-	);
+  croak 'Useless bare finally()' unless wantarray;
+
+  my $caller = caller;
+  _subname("${caller}::finally {...} " => $block)
+    if _HAS_SUBNAME;
+  return (
+    bless(\$block, 'Try::Tiny::Finally'),
+    @rest,
+  );
 }
 
 {
   package # hide from PAUSE
     Try::Tiny::ScopeGuard;
+
+  use constant UNSTABLE_DOLLARAT => ($] < '5.013002') ? 1 : 0;
 
   sub _new {
     shift;
@@ -139,9 +166,22 @@ sub finally (&;@) {
   }
 
   sub DESTROY {
-    my @guts = @{ shift() };
-    my $code = shift @guts;
-    $code->(@guts);
+    my ($code, @args) = @{ $_[0] };
+
+    local $@ if UNSTABLE_DOLLARAT;
+    eval {
+      $code->(@args);
+      1;
+    } or do {
+      warn
+        "Execution of finally() block $code resulted in an exception, which "
+      . '*CAN NOT BE PROPAGATED* due to fundamental limitations of Perl. '
+      . 'Your program will continue as if this event never took place. '
+      . "Original exception text follows:\n\n"
+      . (defined $@ ? $@ : '$@ left undefined...')
+      . "\n"
+      ;
+    }
   }
 }
 
@@ -151,30 +191,36 @@ __END__
 
 =pod
 
+=encoding UTF-8
+
 =head1 NAME
 
-Try::Tiny - minimal try/catch with proper localization of $@
+Try::Tiny - minimal try/catch with proper preservation of $@
+
+=head1 VERSION
+
+version 0.24
 
 =head1 SYNOPSIS
 
 You can use Try::Tiny's C<try> and C<catch> to expect and handle exceptional
 conditions, avoiding quirks in Perl and common mistakes:
 
-	# handle errors with a catch handler
-	try {
-		die "foo";
-	} catch {
-		warn "caught error: $_"; # not $@
-	};
+  # handle errors with a catch handler
+  try {
+    die "foo";
+  } catch {
+    warn "caught error: $_"; # not $@
+  };
 
 You can also use it like a standalone C<eval> to catch and ignore any error
 conditions.  Obviously, this is an extreme measure not to be undertaken
 lightly:
 
-	# just silence errors
-	try {
-		die "foo";
-	};
+  # just silence errors
+  try {
+    die "foo";
+  };
 
 =head1 DESCRIPTION
 
@@ -201,21 +247,28 @@ the C<catch> block, if there is one. Otherwise, it returns C<undef> in scalar
 context or the empty list in list context. The following examples all
 assign C<"bar"> to C<$x>:
 
-	my $x = try { die "foo" } catch { "bar" };
-	my $x = try { die "foo" } || { "bar" };
-	my $x = (try { die "foo" }) // { "bar" };
+  my $x = try { die "foo" } catch { "bar" };
+  my $x = try { die "foo" } || "bar";
+  my $x = (try { die "foo" }) // "bar";
 
-	my $x = eval { die "foo" } || "bar";
+  my $x = eval { die "foo" } || "bar";
 
 You can add C<finally> blocks, yielding the following:
 
-	my $x;
-	try { die 'foo' } finally { $x = 'bar' };
-	try { die 'foo' } catch { warn "Got a die: $_" } finally { $x = 'bar' };
+  my $x;
+  try { die 'foo' } finally { $x = 'bar' };
+  try { die 'foo' } catch { warn "Got a die: $_" } finally { $x = 'bar' };
 
 C<finally> blocks are always executed making them suitable for cleanup code
 which cannot be handled using local.  You can add as many C<finally> blocks to a
 given C<try> block as you like.
+
+Note that adding a C<finally> block without a preceding C<catch> block
+suppresses any errors. This behaviour is consistent with using a standalone
+C<eval>, but it is not consistent with C<try>/C<finally> patterns found in
+other programming languages, such as Java, Python, Javascript or C#. If you
+learnt the C<try>/C<finally> pattern from one of these languages, watch out for
+this.
 
 =head1 EXPORTS
 
@@ -248,7 +301,7 @@ still be invoked.
 
 Once all execution is finished then the C<finally> block, if given, will execute.
 
-=item catch (&;$)
+=item catch (&;@)
 
 Intended to be used in the second argument position of C<try>.
 
@@ -256,7 +309,7 @@ Returns a reference to the subroutine it was given but blessed as
 C<Try::Tiny::Catch> which allows try to decode correctly what to do
 with this code reference.
 
-	catch { ... }
+  catch { ... }
 
 Inside the C<catch> block the caught error is stored in C<$_>, while previous
 value of C<$@> is still available for use.  This value may or may not be
@@ -266,9 +319,9 @@ idea to preserve it in an error stack.
 For code that captures C<$@> when throwing new errors (i.e.
 L<Class::Throwable>), you'll need to do:
 
-	local $@ = $_;
+  local $@ = $_;
 
-=item finally (&;$)
+=item finally (&;@)
 
   try     { ... }
   catch   { ... }
@@ -312,6 +365,11 @@ B<You must always do your own error handling in the C<finally> block>. C<Try::Ti
 not do anything about handling possible errors coming from code located in these
 blocks.
 
+Furthermore B<exceptions in C<finally> blocks are not trappable and are unable
+to influence the execution of your program>. This is due to limitation of
+C<DESTROY>-based scope guards, which C<finally> is implemented on top of. This
+may change in a future version of Try::Tiny.
+
 In the same way C<catch()> blesses the code reference this subroutine does the same
 except it bless them as C<Try::Tiny::Finally>.
 
@@ -336,39 +394,40 @@ More specifically, C<$@> is clobbered at the beginning of the C<eval>, which
 also makes it impossible to capture the previous error before you die (for
 instance when making exception objects with error stacks).
 
-For this reason C<try> will actually set C<$@> to its previous value (before
-the localization) in the beginning of the C<eval> block.
+For this reason C<try> will actually set C<$@> to its previous value (the one
+available before entering the C<try> block) in the beginning of the C<eval>
+block.
 
 =head2 Localizing $@ silently masks errors
 
 Inside an C<eval> block, C<die> behaves sort of like:
 
-	sub die {
-		$@ = $_[0];
-		return_undef_from_eval();
-	}
+  sub die {
+    $@ = $_[0];
+    return_undef_from_eval();
+  }
 
 This means that if you were polite and localized C<$@> you can't die in that
 scope, or your error will be discarded (printing "Something's wrong" instead).
 
 The workaround is very ugly:
 
-	my $error = do {
-		local $@;
-		eval { ... };
-		$@;
-	};
+  my $error = do {
+    local $@;
+    eval { ... };
+    $@;
+  };
 
-	...
-	die $error;
+  ...
+  die $error;
 
 =head2 $@ might not be a true value
 
 This code is wrong:
 
-	if ( $@ ) {
-		...
-	}
+  if ( $@ ) {
+    ...
+  }
 
 because due to the previous caveats it may have been unset.
 
@@ -377,19 +436,19 @@ that's asking for trouble anyway.
 
 The classic failure mode is:
 
-	sub Object::DESTROY {
-		eval { ... }
-	}
+  sub Object::DESTROY {
+    eval { ... }
+  }
 
-	eval {
-		my $obj = Object->new;
+  eval {
+    my $obj = Object->new;
 
-		die "foo";
-	};
+    die "foo";
+  };
 
-	if ( $@ ) {
+  if ( $@ ) {
 
-	}
+  }
 
 In this case since C<Object::DESTROY> is not localizing C<$@> but still uses
 C<eval>, it will set C<$@> to C<"">.
@@ -402,11 +461,11 @@ The workaround for this is even uglier than the previous ones. Even though we
 can't save the value of C<$@> from code that doesn't localize, we can at least
 be sure the C<eval> was aborted due to an error:
 
-	my $failed = not eval {
-		...
+  my $failed = not eval {
+    ...
 
-		return 1;
-	};
+    return 1;
+  };
 
 This is because an C<eval> that caught a C<die> will always return a false
 value.
@@ -415,6 +474,8 @@ value.
 
 Using Perl 5.10 you can use L<perlsyn/"Switch statements">.
 
+=for stopwords topicalizer
+
 The C<catch> block is invoked in a topicalizer context (like a C<given> block),
 but note that you can't return a useful value from C<catch> using the C<when>
 blocks without an explicit C<return>.
@@ -422,12 +483,12 @@ blocks without an explicit C<return>.
 This is somewhat similar to Perl 6's C<CATCH> blocks. You can use it to
 concisely match errors:
 
-	try {
-		require Foo;
-	} catch {
-		when (/^Can't locate .*?\.pm in \@INC/) { } # ignore
-		default { die $_ }
-	};
+  try {
+    require Foo;
+  } catch {
+    when (/^Can't locate .*?\.pm in \@INC/) { } # ignore
+    default { die $_ }
+  };
 
 =head1 CAVEATS
 
@@ -436,21 +497,21 @@ concisely match errors:
 =item *
 
 C<@_> is not available within the C<try> block, so you need to copy your
-arglist. In case you want to work with argument values directly via C<@_>
+argument list. In case you want to work with argument values directly via C<@_>
 aliasing (i.e. allow C<$_[1] = "foo">), you need to pass C<@_> by reference:
 
-	sub foo {
-		my ( $self, @args ) = @_;
-		try { $self->bar(@args) }
-	}
+  sub foo {
+    my ( $self, @args ) = @_;
+    try { $self->bar(@args) }
+  }
 
 or
 
-	sub bar_in_place {
-		my $self = shift;
-		my $args = \@_;
-		try { $_ = $self->bar($_) for @$args }
-	}
+  sub bar_in_place {
+    my $self = shift;
+    my $args = \@_;
+    try { $_ = $self->bar($_) for @$args }
+  }
 
 =item *
 
@@ -458,26 +519,40 @@ C<return> returns from the C<try> block, not from the parent sub (note that
 this is also how C<eval> works, but not how L<TryCatch> works):
 
   sub parent_sub {
-      try {
-          die;
-      }
-      catch {
-          return;
-      };
+    try {
+      die;
+    }
+    catch {
+      return;
+    };
 
-      say "this text WILL be displayed, even though an exception is thrown";
+    say "this text WILL be displayed, even though an exception is thrown";
   }
 
 Instead, you should capture the return value:
 
   sub parent_sub {
-      my $success = try {
-          die;
-          1;
-      }
-      return unless $success;
+    my $success = try {
+      die;
+      1;
+    };
+    return unless $success;
 
-      say "This text WILL NEVER appear!";
+    say "This text WILL NEVER appear!";
+  }
+  # OR
+  sub parent_sub_with_catch {
+    my $success = try {
+      die;
+      1;
+    }
+    catch {
+      # do something with $_
+      return undef; #see note
+    };
+    return unless $success;
+
+    say "This text WILL NEVER appear!";
   }
 
 Note that if you have a C<catch> block, it must return C<undef> for this to work,
@@ -490,11 +565,13 @@ C<try> introduces another caller stack frame. L<Sub::Uplevel> is not used. L<Car
 will not report this when using full stack traces, though, because
 C<%Carp::Internal> is used. This lack of magic is considered a feature.
 
+=for stopwords unhygienically
+
 =item *
 
 The value of C<$_> in the C<catch> block is not guaranteed to be the value of
 the exception thrown (C<$@>) in the C<try> block.  There is no safe way to
-ensure this, since C<eval> may be used unhygenically in destructors.  The only
+ensure this, since C<eval> may be used unhygienically in destructors.  The only
 guarantee is that the C<catch> will be called if an exception is thrown.
 
 =item *
@@ -503,15 +580,15 @@ The return value of the C<catch> block is not ignored, so if testing the result
 of the expression for truth on success, be sure to return a false value from
 the C<catch> block:
 
-	my $obj = try {
-		MightFail->new;
-	} catch {
-		...
+  my $obj = try {
+    MightFail->new;
+  } catch {
+    ...
 
-		return; # avoid returning a true value;
-	};
+    return; # avoid returning a true value;
+  };
 
-	return unless $obj;
+  return unless $obj;
 
 =item *
 
@@ -529,16 +606,22 @@ Lexical C<$_> may override the one set by C<catch>.
 For example Perl 5.10's C<given> form uses a lexical C<$_>, creating some
 confusing behavior:
 
-	given ($foo) {
-		when (...) {
-			try {
-				...
-			} catch {
-				warn $_; # will print $foo, not the error
-				warn $_[0]; # instead, get the error like this
-			}
-		}
-	}
+  given ($foo) {
+    when (...) {
+      try {
+        ...
+      } catch {
+        warn $_; # will print $foo, not the error
+        warn $_[0]; # instead, get the error like this
+      }
+    }
+  }
+
+Note that this behavior was changed once again in L<Perl5 version 18
+|https://metacpan.org/module/perldelta#given-now-aliases-the-global-_>.
+However, since the entirety of lexical C<$_> is now L<considered experimental
+|https://metacpan.org/module/perldelta#Lexical-_-is-now-experimental>, it
+is unclear whether the new version 18 behavior is final.
 
 =back
 
@@ -580,25 +663,129 @@ issues with C<$@>, but you still need to localize to prevent clobbering.
 I gave a lightning talk about this module, you can see the slides (Firefox
 only):
 
-L<http://nothingmuch.woobling.org/talks/takahashi.xul?data=yapc_asia_2009/try_tiny.txt>
+L<http://web.archive.org/web/20100628040134/http://nothingmuch.woobling.org/talks/takahashi.xul>
 
 Or read the source:
 
-L<http://nothingmuch.woobling.org/talks/yapc_asia_2009/try_tiny.yml>
+L<http://web.archive.org/web/20100305133605/http://nothingmuch.woobling.org/talks/yapc_asia_2009/try_tiny.yml>
 
 =head1 VERSION CONTROL
 
-L<http://github.com/nothingmuch/try-tiny/>
+L<http://github.com/doy/try-tiny/>
 
-=head1 AUTHOR
+=head1 SUPPORT
 
-Yuval Kogman E<lt>nothingmuch@woobling.orgE<gt>
+Bugs may be submitted through L<the RT bug tracker|https://rt.cpan.org/Public/Dist/Display.html?Name=Try-Tiny>
+(or L<bug-Try-Tiny@rt.cpan.org|mailto:bug-Try-Tiny@rt.cpan.org>).
 
-=head1 COPYRIGHT
+=head1 AUTHORS
 
-	Copyright (c) 2009 Yuval Kogman. All rights reserved.
-	This program is free software; you can redistribute
-	it and/or modify it under the terms of the MIT license.
+=over 4
+
+=item *
+
+יובל קוג'מן (Yuval Kogman) <nothingmuch@woobling.org>
+
+=item *
+
+Jesse Luehrs <doy@tozt.net>
+
+=back
+
+=head1 CONTRIBUTORS
+
+=for stopwords Karen Etheridge Peter Rabbitson Ricardo Signes Mark Fowler Graham Knop Dagfinn Ilmari Mannsåker Paul Howarth Rudolf Leermakers anaxagoras awalker chromatic Alex cm-perl Andrew Yates David Lowe Glenn Hans Dieter Pearcey Jonathan Yu Marc Mims Stosberg
+
+=over 4
+
+=item *
+
+Karen Etheridge <ether@cpan.org>
+
+=item *
+
+Peter Rabbitson <ribasushi@cpan.org>
+
+=item *
+
+Ricardo Signes <rjbs@cpan.org>
+
+=item *
+
+Mark Fowler <mark@twoshortplanks.com>
+
+=item *
+
+Graham Knop <haarg@haarg.org>
+
+=item *
+
+Dagfinn Ilmari Mannsåker <ilmari@ilmari.org>
+
+=item *
+
+Paul Howarth <paul@city-fan.org>
+
+=item *
+
+Rudolf Leermakers <rudolf@hatsuseno.org>
+
+=item *
+
+anaxagoras <walkeraj@gmail.com>
+
+=item *
+
+awalker <awalker@sourcefire.com>
+
+=item *
+
+chromatic <chromatic@wgz.org>
+
+=item *
+
+Alex <alex@koban.(none)>
+
+=item *
+
+cm-perl <cm-perl@users.noreply.github.com>
+
+=item *
+
+Andrew Yates <ayates@haddock.local>
+
+=item *
+
+David Lowe <davidl@lokku.com>
+
+=item *
+
+Glenn Fowler <cebjyre@cpan.org>
+
+=item *
+
+Hans Dieter Pearcey <hdp@weftsoar.net>
+
+=item *
+
+Jonathan Yu <JAWNSY@cpan.org>
+
+=item *
+
+Marc Mims <marc@questright.com>
+
+=item *
+
+Mark Stosberg <mark@stosberg.com>
+
+=back
+
+=head1 COPYRIGHT AND LICENCE
+
+This software is Copyright (c) 2009 by יובל קוג'מן (Yuval Kogman).
+
+This is free software, licensed under:
+
+  The MIT (X11) License
 
 =cut
-

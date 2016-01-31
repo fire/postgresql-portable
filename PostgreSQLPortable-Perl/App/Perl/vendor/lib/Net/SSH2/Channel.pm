@@ -193,6 +193,11 @@ Attempts to write the buffer to the channel.  Returns number of bytes written,
 undef on failure.  If ext is present and set, writes to the extended data
 channel (stderr).
 
+In case the write operation would block and non-blocking mode is
+active then it returns LIBSSH2_ERROR_AGAIN without setting the global
+session error (yes, that's quite ugly, but it is how the underlying
+libssh2 works).
+
 =head2 flush ( [ ext ] )
 
 Flushes the channel; if ext is present and set, flushes extended data channel.
@@ -202,6 +207,31 @@ Returns number of bytes flushed, undef on error.
 
 Returns the exit signal of the command executed on the channel. Requires libssh
 1.2.8 or higher.
+
+=head2 window_read
+
+Returns the number of bytes which the remote end may send without
+overflowing the window limit.
+
+In list context it also returns the number of bytes that are
+immediately available for read and the size of the initial window.
+
+=head2 window_write
+
+Returns the number of bytes which may be safely written on the channel
+without blocking. In list context it also returns the size of the
+initial window.
+
+=head2 receive_window_adjust (adjustment [, force])
+
+Adjust the channel receive window by the given C<adjustment> bytes.
+
+If the amount to be adjusted is less than C<LIBSSH2_CHANNEL_MINADJUST>
+and force is false the adjustment amount will be queued for a later
+packet.
+
+On success returns the new size of the receive window. On failure it
+returns undef.
 
 =head1 SEE ALSO
 

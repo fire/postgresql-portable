@@ -1,10 +1,9 @@
 package DateTime::LeapSecond;
-{
-  $DateTime::LeapSecond::VERSION = '0.78';
-}
 
 use strict;
 use warnings;
+
+our $VERSION = '1.21';
 
 use vars qw( @RD @LEAP_SECONDS %RD_LENGTH );
 
@@ -77,9 +76,6 @@ sub day_length {
 
 sub _initialize {
 
-    # this table: ftp://62.161.69.5/pub/tai/publication/leaptab.txt
-    # known accurate until (at least): 2005-12-31
-    #
     # There are no leap seconds before 1972, because that's the
     # year this system was implemented.
     #
@@ -112,6 +108,7 @@ sub _initialize {
             2006  Jan. 1  +1
             2009  Jan. 1  +1
             2012  Jun. 1  +1
+            2015  Jul. 1  +1
             )
     );
 }
@@ -119,6 +116,7 @@ sub _initialize {
 __PACKAGE__->_initialize();
 
 1;
+
 # ABSTRACT: leap seconds table and utilities
 
 __END__
@@ -131,7 +129,7 @@ DateTime::LeapSecond - leap seconds table and utilities
 
 =head1 VERSION
 
-version 0.78
+version 1.21
 
 =head1 SYNOPSIS
 
@@ -184,7 +182,7 @@ Dave Rolsky <autarch@urth.org>
 
 =head1 COPYRIGHT AND LICENSE
 
-This software is Copyright (c) 2012 by Dave Rolsky.
+This software is Copyright (c) 2015 by Dave Rolsky.
 
 This is free software, licensed under:
 

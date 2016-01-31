@@ -1,10 +1,9 @@
 package Params::Validate::PP;
-{
-  $Params::Validate::PP::VERSION = '1.07';
-}
 
 use strict;
 use warnings;
+
+our $VERSION = '1.21';
 
 use Params::Validate::Constants;
 use Scalar::Util 1.10 ();
@@ -46,7 +45,7 @@ sub validate_pos (\@@) {
 
         # if the spec is bigger that's where we can start adding
         # defaults
-        for ( my $x = $#p + 1 ; $x <= $#specs ; $x++ ) {
+        for ( my $x = $#p + 1; $x <= $#specs; $x++ ) {
             $p[$x] = $specs[$x]->{default}
                 if ref $specs[$x] && exists $specs[$x]->{default};
         }
@@ -100,10 +99,9 @@ sub validate_pos (\@@) {
         next unless ref $spec;
 
         if ( $_ <= $#p ) {
-            my $value = defined $p[$_] ? qq|"$p[$_]"| : 'undef';
             _validate_one_param(
                 $p[$_], \@p, $spec,
-                "Parameter #" . ( $_ + 1 ) . " ($value)"
+                'Parameter #' . ( $_ + 1 ) . ' (%s)'
             );
         }
 
@@ -341,7 +339,7 @@ OUTER:
             my $value = defined $p->{$key} ? qq|"$p->{$key}"| : 'undef';
             _validate_one_param(
                 $p->{$key}, $p, $spec,
-                "The '$key' parameter ($value)"
+                qq{The '$key' parameter (%s)}
             );
         }
     }
@@ -349,7 +347,7 @@ OUTER:
     if (@missing) {
         my $called = _get_called();
 
-        my $missing = join ', ', map { "'$_'" } @missing;
+        my $missing = join ', ', map {"'$_'"} @missing;
         $options->{on_fail}->( "Mandatory parameter"
                 . ( @missing > 1 ? 's' : '' )
                 . " $missing missing in call to $called\n" );
@@ -470,7 +468,7 @@ sub _validate_one_param {
             $msg
                 .= ".\n Use the constants exported by Params::Validate to declare types.";
 
-            $options->{on_fail}->($msg);
+            $options->{on_fail}->( sprintf( $msg, _stringify($value) ) );
         }
 
         unless ( _get_type($value) & $spec->{type} ) {
@@ -482,8 +480,13 @@ sub _validate_one_param {
 
             my $called = _get_called(1);
 
-            $options->{on_fail}->( "$id to $called was $article '@is', which "
-                    . "is not one of the allowed types: @allowed\n" );
+            $options->{on_fail}->(
+                sprintf(
+                    "$id to $called was $article '@is', which "
+                        . "is not one of the allowed types: @allowed\n",
+                    _stringify($value)
+                )
+            );
         }
     }
 
@@ -498,19 +501,22 @@ sub _validate_one_param {
         foreach ( ref $spec->{isa} ? @{ $spec->{isa} } : $spec->{isa} ) {
             unless (
                 do {
-                    local $@;
+                    local $@ = q{};
                     eval { $value->isa($_) };
                 }
                 ) {
                 my $is = ref $value ? ref $value : 'plain scalar';
-                my $article1 = $_  =~ /^[aeiou]/i ? 'an' : 'a';
+                my $article1 = $_ =~ /^[aeiou]/i  ? 'an' : 'a';
                 my $article2 = $is =~ /^[aeiou]/i ? 'an' : 'a';
 
                 my $called = _get_called(1);
 
-                $options->{on_fail}
-                    ->(   "$id to $called was not $article1 '$_' "
-                        . "(it is $article2 $is)\n" );
+                $options->{on_fail}->(
+                    sprintf(
+                              "$id to $called was not $article1 '$_' "
+                            . "(it is $article2 $is)\n", _stringify($value)
+                    )
+                );
             }
         }
     }
@@ -519,14 +525,18 @@ sub _validate_one_param {
         foreach ( ref $spec->{can} ? @{ $spec->{can} } : $spec->{can} ) {
             unless (
                 do {
-                    local $@;
+                    local $@ = q{};
                     eval { $value->can($_) };
                 }
                 ) {
                 my $called = _get_called(1);
 
-                $options->{on_fail}
-                    ->("$id to $called does not have the method: '$_'\n");
+                $options->{on_fail}->(
+                    sprintf(
+                        "$id to $called does not have the method: '$_'\n",
+                        _stringify($value)
+                    )
+                );
             }
         }
     }
@@ -549,11 +559,26 @@ sub _validate_one_param {
                 );
             }
 
-            unless ( $spec->{callbacks}{$_}->( $value, $params ) ) {
+            my $ok;
+            my $e = do {
+                local $@ = q{};
+                local $SIG{__DIE__};
+                $ok = eval { $spec->{callbacks}{$_}->( $value, $params ) };
+                $@;
+            };
+
+            if ( !$ok ) {
                 my $called = _get_called(1);
 
-                $options->{on_fail}
-                    ->("$id to $called did not pass the '$_' callback\n");
+                if ( ref $e ) {
+                    $options->{on_fail}->($e);
+                }
+                else {
+                    my $msg = "$id to $called did not pass the '$_' callback";
+                    $msg .= ": $e" if length $e;
+                    $msg .= "\n";
+                    $options->{on_fail}->( sprintf( $msg, _stringify($value) ) );
+                }
             }
         }
     }
@@ -562,8 +587,12 @@ sub _validate_one_param {
         unless ( ( defined $value ? $value : '' ) =~ /$spec->{regex}/ ) {
             my $called = _get_called(1);
 
-            $options->{on_fail}
-                ->("$id to $called did not pass regex check\n");
+            $options->{on_fail}->(
+                sprintf(
+                    "$id to $called did not pass regex check\n",
+                    _stringify($value)
+                )
+            );
         }
     }
 }
@@ -697,6 +726,10 @@ sub _get_called {
     $called = 'N/A' unless defined $called;
 
     return $called;
+}
+
+sub _stringify {
+    return defined $_[0] ? qq{"$_[0]"} : 'undef';
 }
 
 1;

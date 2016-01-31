@@ -1,14 +1,12 @@
 package DateTime::TimeZone::Local;
-{
-  $DateTime::TimeZone::Local::VERSION = '1.57';
-}
-
+$DateTime::TimeZone::Local::VERSION = '1.94';
 use strict;
 use warnings;
 
-use Class::Load qw( is_class_loaded load_class try_load_class );
 use DateTime::TimeZone;
 use File::Spec;
+use Module::Runtime qw( require_module );
+use Try::Tiny;
 
 sub TimeZone {
     my $class = shift;
@@ -37,6 +35,7 @@ sub TimeZone {
         NetWare => 'Win32',
         symbian => 'Win32',
         dos     => 'OS2',
+        android => 'Android',
         cygwin  => 'Unix',
     );
 
@@ -46,13 +45,16 @@ sub TimeZone {
         my $os_name = $subclass{$^O} || $^O;
         my $subclass = $class . '::' . $os_name;
 
-        return $subclass if is_class_loaded($subclass);
+        return $subclass if $subclass->can('Methods');
 
-        return $subclass if try_load_class($subclass);
+        return $subclass if try {
+            local $SIG{__DIE__};
+            require_module($subclass);
+        };
 
         $subclass = $class . '::Unix';
 
-        load_class($subclass);
+        require_module($subclass);
 
         return $subclass;
     }
@@ -63,12 +65,11 @@ sub FromEnv {
 
     foreach my $var ( $class->EnvVars() ) {
         if ( $class->_IsValidName( $ENV{$var} ) ) {
-            my $tz;
-            {
-                local $@;
+            my $tz = try {
                 local $SIG{__DIE__};
-                $tz = eval { DateTime::TimeZone->new( name => $ENV{$var} ) };
-            }
+                DateTime::TimeZone->new( name => $ENV{$var} );
+            };
+
             return $tz if $tz;
         }
     }
@@ -99,7 +100,7 @@ DateTime::TimeZone::Local - Determine the local system's time zone
 
 =head1 VERSION
 
-version 1.57
+version 1.94
 
 =head1 SYNOPSIS
 
@@ -164,7 +165,7 @@ list of env vars to be checked by C<< $class->FromEnv() >>.
 =head2 $class->_IsValidName($name)
 
 Given a possible time zone name, this returns a boolean indicating
-whether or not the the name looks valid. It always return false for
+whether or not the name looks valid. It always return false for
 "local" in order to avoid infinite loops.
 
 =head1 EXAMPLE SUBCLASS
@@ -196,7 +197,7 @@ Dave Rolsky <autarch@urth.org>
 
 =head1 COPYRIGHT AND LICENSE
 
-This software is copyright (c) 2013 by Dave Rolsky.
+This software is copyright (c) 2015 by Dave Rolsky.
 
 This is free software; you can redistribute it and/or modify it under
 the same terms as the Perl 5 programming language system itself.

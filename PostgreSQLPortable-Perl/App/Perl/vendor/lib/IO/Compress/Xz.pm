@@ -2,18 +2,18 @@ package IO::Compress::Xz ;
 
 use strict ;
 use warnings;
-use bytes;
+# use bytes;
 require Exporter ;
 
-use IO::Compress::Base 2.060 ;
-use IO::Compress::Base::Common  2.060 qw(createSelfTiedObject);
-use IO::Compress::Adapter::Xz 2.060 ;
-use Compress::Raw::Lzma  2.060 ;
+use IO::Compress::Base 2.069 ;
+use IO::Compress::Base::Common  2.069 qw(createSelfTiedObject);
+use IO::Compress::Adapter::Xz 2.069 ;
+use Compress::Raw::Lzma  2.069 ;
 
 
-our ($VERSION, @ISA, @EXPORT_OK, %EXPORT_TAGS, $XzError);
+use vars qw($VERSION @ISA @EXPORT_OK %EXPORT_TAGS $XzError);
 
-$VERSION = '2.060';
+$VERSION = '2.069';
 $XzError = '';
 
 @ISA    = qw(Exporter IO::Compress::Base);
@@ -207,7 +207,7 @@ section.
 
 The functional interface needs Perl5.005 or better.
 
-=head2 xz $input => $output [, OPTS]
+=head2 xz $input_filename_or_reference => $output_filename_or_reference [, OPTS]
 
 C<xz> expects at least two parameters,
 C<$input_filename_or_reference> and C<$output_filename_or_reference>.
@@ -542,7 +542,7 @@ Valid values are 0-9 and C<LZMA_PRESET_DEFAULT>.
 0 is the fastest compression with the lowest memory usage and the lowest
 compression.
 
-9 is the slowest compession with the highest memory usage but with the best
+9 is the slowest compression with the highest memory usage but with the best
 compression.
 
 Defaults to C<LZMA_PRESET_DEFAULT> (6).
@@ -749,7 +749,7 @@ Usage is
 
 Closes the current compressed data stream and starts a new one.
 
-OPTS consists of any of the the options that are available when creating
+OPTS consists of any of the options that are available when creating
 the C<$z> object.
 
 See the L</"Constructor Options"> section for more details.
@@ -793,7 +793,7 @@ See the Changes file.
 
 =head1 COPYRIGHT AND LICENSE
 
-Copyright (c) 2005-2013 Paul Marquess. All rights reserved.
+Copyright (c) 2005-2015 Paul Marquess. All rights reserved.
 
 This program is free software; you can redistribute it and/or
 modify it under the same terms as Perl itself.

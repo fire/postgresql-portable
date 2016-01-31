@@ -1,31 +1,17 @@
 @rem = '--*-Perl-*--
 @echo off
 if "%OS%" == "Windows_NT" goto WinNT
-IF EXIST "%~dp0perl.exe" (
-"%~dp0perl.exe" -x -S "%0" %1 %2 %3 %4 %5 %6 %7 %8 %9
-) ELSE IF EXIST "%~dp0..\..\bin\perl.exe" (
-"%~dp0..\..\bin\perl.exe" -x -S "%0" %1 %2 %3 %4 %5 %6 %7 %8 %9
-) ELSE (
 perl -x -S "%0" %1 %2 %3 %4 %5 %6 %7 %8 %9
-)
-
 goto endofperl
 :WinNT
-IF EXIST "%~dp0perl.exe" (
-"%~dp0perl.exe" -x -S %0 %*
-) ELSE IF EXIST "%~dp0..\..\bin\perl.exe" (
-"%~dp0..\..\bin\perl.exe" -x -S %0 %*
-) ELSE (
 perl -x -S %0 %*
-)
-
 if NOT "%COMSPEC%" == "%SystemRoot%\system32\cmd.exe" goto endofperl
 if %errorlevel% == 9009 echo You do not have Perl in your PATH.
 if errorlevel 1 goto script_failed_so_exit_with_non_zero_val 2>nul
 goto endofperl
 @rem ';
 #!/usr/local/bin/perl -w
-#line 29
+#line 15
 'di';
 'ig00';
 ##############################################################################
@@ -223,7 +209,7 @@ INLINE_LITERAL_TEXT
       $iflag='i',           next if $arg eq '-i';       ## ignore case
       $norc=1,              next if $arg eq '-norc';    ## don't load rc file
       $showrc=1,            next if $arg eq '-showrc';  ## show rc file
-      $underlineOK=1,       next if $arg eq '-u';       ## look throuh underln.
+      $underlineOK=1,       next if $arg eq '-u';       ## look through underln.
       $words=1,             next if $arg eq '-w';       ## match "words" only
       &strip                     if $arg eq '-strip';   ## dump this program
       last                       if $arg eq '-e';

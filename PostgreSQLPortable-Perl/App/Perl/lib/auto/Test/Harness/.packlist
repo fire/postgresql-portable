@@ -15,6 +15,7 @@ C:\strawberry\perl\lib\TAP\Formatter\File\Session.pm
 C:\strawberry\perl\lib\TAP\Formatter\Session.pm
 C:\strawberry\perl\lib\TAP\Harness.pm
 C:\strawberry\perl\lib\TAP\Harness\Beyond.pod
+C:\strawberry\perl\lib\TAP\Harness\Env.pm
 C:\strawberry\perl\lib\TAP\Object.pm
 C:\strawberry\perl\lib\TAP\Parser.pm
 C:\strawberry\perl\lib\TAP\Parser\Aggregator.pm
@@ -45,7 +46,6 @@ C:\strawberry\perl\lib\TAP\Parser\SourceHandler\File.pm
 C:\strawberry\perl\lib\TAP\Parser\SourceHandler\Handle.pm
 C:\strawberry\perl\lib\TAP\Parser\SourceHandler\Perl.pm
 C:\strawberry\perl\lib\TAP\Parser\SourceHandler\RawTAP.pm
-C:\strawberry\perl\lib\TAP\Parser\Utils.pm
 C:\strawberry\perl\lib\TAP\Parser\YAMLish\Reader.pm
 C:\strawberry\perl\lib\TAP\Parser\YAMLish\Writer.pm
 C:\strawberry\perl\lib\Test\HACKING.pod

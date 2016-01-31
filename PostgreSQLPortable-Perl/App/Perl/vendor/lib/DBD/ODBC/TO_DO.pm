@@ -1,3 +1,5 @@
+use strict;
+
 =head1 NAME
 
 DBD::ODBC::TO_DO - Things to do in DBD::ODBC
@@ -9,6 +11,8 @@ $Revision: 10667 $
 =cut
 
 =head1 Todo
+
+  Get travis testing actually running tests against a driver.
 
   Better/more tests on multiple statement handles which ensure the
     correct number of rows

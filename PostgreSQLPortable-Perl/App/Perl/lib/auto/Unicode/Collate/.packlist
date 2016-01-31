@@ -91,5 +91,4 @@ C:\strawberry\perl\lib\Unicode\Collate\Locale\zh_strk.pl
 C:\strawberry\perl\lib\Unicode\Collate\Locale\zh_zhu.pl
 C:\strawberry\perl\lib\Unicode\Collate\allkeys.txt
 C:\strawberry\perl\lib\Unicode\Collate\keys.txt
-C:\strawberry\perl\lib\auto\Unicode\Collate\Collate.bs
-C:\strawberry\perl\lib\auto\Unicode\Collate\Collate.dll
+C:\strawberry\perl\lib\auto\Unicode\Collate\Collate.xs.dll

@@ -1,14 +1,33 @@
-package MooseX::Types::Combine;
-{
-  $MooseX::Types::Combine::VERSION = '0.35';
-}
-
-# ABSTRACT: Combine type libraries for exporting
-
 use strict;
 use warnings;
-use Class::MOP ();
+package MooseX::Types::Combine;
+# ABSTRACT: Combine type libraries for exporting
 
+our $VERSION = '0.46';
+
+use Module::Runtime 'use_module';
+use namespace::autoclean;
+
+#pod =head1 SYNOPSIS
+#pod
+#pod     package CombinedTypeLib;
+#pod
+#pod     use base 'MooseX::Types::Combine';
+#pod
+#pod     __PACKAGE__->provide_types_from(qw/TypeLib1 TypeLib2/);
+#pod
+#pod     package UserClass;
+#pod
+#pod     use CombinedTypeLib qw/Type1 Type2 ... /;
+#pod
+#pod =head1 DESCRIPTION
+#pod
+#pod Allows you to export types from multiple type libraries.
+#pod
+#pod Libraries on the right end of the list passed to L</provide_types_from>
+#pod take precedence over those on the left in case of conflicts.
+#pod
+#pod =cut
 
 sub import {
     my ($class, @types) = @_;
@@ -39,6 +58,13 @@ sub import {
         for keys %from;
 }
 
+#pod =head1 CLASS METHODS
+#pod
+#pod =head2 provide_types_from
+#pod
+#pod Sets or returns a list of type libraries to re-export from.
+#pod
+#pod =cut
 
 sub provide_types_from {
     my ($class, @libs) = @_;
@@ -64,7 +90,7 @@ sub provide_types_from {
 sub _check_type_lib {
     my ($class, $lib) = @_;
 
-    Class::MOP::load_class($lib);
+    use_module($lib);
 
     die "Cannot use $lib in a combined type library, it does not provide any types"
         unless $lib->can('type_names');
@@ -82,11 +108,19 @@ sub _provided_types {
     %$types;
 }
 
+#pod =head1 SEE ALSO
+#pod
+#pod L<MooseX::Types>
+#pod
+#pod =cut
 
 1;
 
 __END__
+
 =pod
+
+=encoding UTF-8
 
 =head1 NAME
 
@@ -94,7 +128,7 @@ MooseX::Types::Combine - Combine type libraries for exporting
 
 =head1 VERSION
 
-version 0.35
+version 0.46
 
 =head1 SYNOPSIS
 
@@ -110,9 +144,9 @@ version 0.35
 
 =head1 DESCRIPTION
 
-Allows you to export types from multiple type libraries. 
+Allows you to export types from multiple type libraries.
 
-Libraries on the right side of the type libs passed to L</provide_types_from>
+Libraries on the right end of the list passed to L</provide_types_from>
 take precedence over those on the left in case of conflicts.
 
 =head1 CLASS METHODS
@@ -125,21 +159,15 @@ Sets or returns a list of type libraries to re-export from.
 
 L<MooseX::Types>
 
-=head1 LICENSE
-
-This program is free software; you can redistribute it and/or modify
-it under the same terms as perl itself.
-
 =head1 AUTHOR
 
 Robert "phaylon" Sedlacek <rs@474.at>
 
 =head1 COPYRIGHT AND LICENSE
 
-This software is copyright (c) 2012 by Robert "phaylon" Sedlacek.
+This software is copyright (c) 2007 by Robert "phaylon" Sedlacek.
 
 This is free software; you can redistribute it and/or modify it under
 the same terms as the Perl 5 programming language system itself.
 
 =cut
-

@@ -3,7 +3,7 @@ use strict;
 use warnings;
 package Capture::Tiny;
 # ABSTRACT: Capture STDOUT and STDERR from Perl, XS or external programs
-our $VERSION = '0.21'; # VERSION
+our $VERSION = '0.30';
 use Carp ();
 use Exporter ();
 use IO::Handle ();
@@ -63,11 +63,18 @@ our $TIMEOUT = 30;
 # This is annoying, but seems to be the best that can be done
 # as a simple, portable IPC technique
 #--------------------------------------------------------------------------#
-my @cmd = ($^X, '-C0', '-e', '$SIG{HUP}=sub{exit}; '
-  . 'if( my $fn=shift ){ open my $fh, qq{>$fn}; print {$fh} $$; close $fh;} '
-  . 'my $buf; while (sysread(STDIN, $buf, 2048)) { '
-  . 'syswrite(STDOUT, $buf); syswrite(STDERR, $buf)}'
-);
+my @cmd = ($^X, '-C0', '-e', <<'HERE');
+use Fcntl;
+$SIG{HUP}=sub{exit};
+if ( my $fn=shift ) {
+    sysopen(my $fh, qq{$fn}, O_WRONLY|O_CREAT|O_EXCL) or die $!;
+    print {$fh} $$;
+    close $fh;
+}
+my $buf; while (sysread(STDIN, $buf, 2048)) {
+    syswrite(STDOUT, $buf); syswrite(STDERR, $buf);
+}
+HERE
 
 #--------------------------------------------------------------------------#
 # filehandle manipulation
@@ -114,7 +121,7 @@ sub _proxy_std {
       _open $dup{stdin} = IO::Handle->new, "<&=STDIN";
     }
     $proxies{stdin} = \*STDIN;
-    binmode(STDIN, ':utf8') if $] >= 5.008;
+    binmode(STDIN, ':utf8') if $] >= 5.008; ## no critic
   }
   if ( ! defined fileno STDOUT ) {
     $proxy_count{stdout}++;
@@ -128,7 +135,7 @@ sub _proxy_std {
       _open $dup{stdout} = IO::Handle->new, ">&=STDOUT";
     }
     $proxies{stdout} = \*STDOUT;
-    binmode(STDOUT, ':utf8') if $] >= 5.008;
+    binmode(STDOUT, ':utf8') if $] >= 5.008; ## no critic
   }
   if ( ! defined fileno STDERR ) {
     $proxy_count{stderr}++;
@@ -142,7 +149,7 @@ sub _proxy_std {
       _open $dup{stderr} = IO::Handle->new, ">&=STDERR";
     }
     $proxies{stderr} = \*STDERR;
-    binmode(STDERR, ':utf8') if $] >= 5.008;
+    binmode(STDERR, ':utf8') if $] >= 5.008; ## no critic
   }
   return %proxies;
 }
@@ -203,7 +210,7 @@ sub _start_tee {
   # execute @cmd as a separate process
   if ( $IS_WIN32 ) {
     local $@;
-    eval "use Win32API::File qw/CloseHandle GetOsFHandle SetHandleInformation fileLastError HANDLE_FLAG_INHERIT INVALID_HANDLE_VALUE/ ";
+    eval "use Win32API::File qw/GetOsFHandle SetHandleInformation fileLastError HANDLE_FLAG_INHERIT INVALID_HANDLE_VALUE/ ";
     # _debug( "# Win32API::File loaded\n") unless $@;
     my $os_fhandle = GetOsFHandle( $stash->{tee}{$which} );
     # _debug( "# Couldn't get OS handle: " . fileLastError() . "\n") if ! defined $os_fhandle || $os_fhandle == INVALID_HANDLE_VALUE();
@@ -257,8 +264,8 @@ sub _wait_for_tees {
 sub _kill_tees {
   my ($stash) = @_;
   if ( $IS_WIN32 ) {
-    # _debug( "# closing handles with CloseHandle\n");
-    CloseHandle( GetOsFHandle($_) ) for values %{ $stash->{tee} };
+    # _debug( "# closing handles\n");
+    close($_) for values %{ $stash->{tee} };
     # _debug( "# waiting for subprocesses to finish\n");
     my $start = time;
     1 until wait == -1 || (time - $start > 30);
@@ -362,6 +369,8 @@ sub _capture_tee {
     eval { @result = $code->(); $inner_error = $@ };
     $exit_code = $?; # save this for later
     $outer_error = $@; # save this for later
+    STDOUT->flush if $do_stdout;
+    STDERR->flush if $do_stderr;
   }
   # restore prior filehandles and shut down tees
   # _debug( "# restoring filehandles ...\n" );
@@ -405,13 +414,15 @@ __END__
 
 =pod
 
+=encoding UTF-8
+
 =head1 NAME
 
 Capture::Tiny - Capture STDOUT and STDERR from Perl, XS or external programs
 
 =head1 VERSION
 
-version 0.21
+version 0.30
 
 =head1 SYNOPSIS
 
@@ -483,6 +494,21 @@ scalar context on the return value, you must use the C<<< scalar >>> keyword.
      my @list = qw/one two three/;
      return scalar @list; # $count will be 3
    };
+
+Also note that within the coderef, the C<<< @_ >>> variable will be empty.  So don't
+use arguments from a surrounding subroutine without copying them to an array
+first:
+
+   sub wont_work {
+     my ($stdout, $stderr) = capture { do_stuff( @_ ) };    # WRONG
+     ...
+   }
+ 
+   sub will_work {
+     my @args = @_;
+     my ($stdout, $stderr) = capture { do_stuff( @args ) }; # RIGHT
+     ...
+   }
 
 Captures are normally done to an anonymous temporary filehandle.  To
 capture via a named file (e.g. to externally monitor a long-running capture),
@@ -670,11 +696,14 @@ Perl 5.6 predates PerlIO.  UTF-8 data may not be captured correctly.
 
 =head2 PERL_CAPTURE_TINY_TIMEOUT
 
-Capture::Tiny uses subprocesses for C<<< tee >>>.  By default, Capture::Tiny will
-timeout with an error if the subprocesses are not ready to receive data within
-30 seconds (or whatever is the value of C<<< $Capture::Tiny::TIMEOUT >>>).  An
-alternate timeout may be specified by setting the C<<< PERL_CAPTURE_TINY_TIMEOUT >>>
-environment variable.  Setting it to zero will disable timeouts.
+Capture::Tiny uses subprocesses internally for C<<< tee >>>.  By default,
+Capture::Tiny will timeout with an error if such subprocesses are not ready to
+receive data within 30 seconds (or whatever is the value of
+C<<< $Capture::Tiny::TIMEOUT >>>).  An alternate timeout may be specified by setting
+the C<<< PERL_CAPTURE_TINY_TIMEOUT >>> environment variable.  Setting it to zero will
+disable timeouts.  BE<lt>NOTEE<gt>, this does not timeout the code reference being
+captured -- this only prevents Capture::Tiny itself from hanging your process
+waiting for its child processes to be ready to proceed.
 
 =head1 SEE ALSO
 
@@ -784,7 +813,7 @@ L<Test::Output>
 =head2 Bugs / Feature Requests
 
 Please report any bugs or feature requests through the issue tracker
-at L<https://rt.cpan.org/Public/Dist/Display.html?Name=Capture-Tiny>.
+at L<https://github.com/dagolden/Capture-Tiny/issues>.
 You will be notified automatically of any progress on your issue.
 
 =head2 Source Code
@@ -792,13 +821,29 @@ You will be notified automatically of any progress on your issue.
 This is open source software.  The code repository is available for
 public review and contribution under the terms of the license.
 
-L<https://github.com/dagolden/capture-tiny>
+L<https://github.com/dagolden/Capture-Tiny>
 
-  git clone git://github.com/dagolden/capture-tiny.git
+  git clone https://github.com/dagolden/Capture-Tiny.git
 
 =head1 AUTHOR
 
 David Golden <dagolden@cpan.org>
+
+=head1 CONTRIBUTORS
+
+=for stopwords Dagfinn Ilmari Mannsåker David E. Wheeler
+
+=over 4
+
+=item *
+
+Dagfinn Ilmari Mannsåker <ilmari@ilmari.org>
+
+=item *
+
+David E. Wheeler <david@justatheory.com>
+
+=back
 
 =head1 COPYRIGHT AND LICENSE
 

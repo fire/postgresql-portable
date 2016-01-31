@@ -1,10 +1,11 @@
-package Moose::Manual::Roles;
-
+# PODNAME: Moose::Manual::Roles
 # ABSTRACT: Roles, an alternative to deep hierarchies and base classes
 
-
+__END__
 
 =pod
+
+=encoding UTF-8
 
 =head1 NAME
 
@@ -12,7 +13,7 @@ Moose::Manual::Roles - Roles, an alternative to deep hierarchies and base classe
 
 =head1 VERSION
 
-version 2.0604
+version 2.1604
 
 =head1 WHAT IS A ROLE?
 
@@ -112,6 +113,16 @@ We could use this same role in a C<Bone> class:
 
 See also L<Moose::Cookbook::Roles::Comparable_CodeReuse> for an example.
 
+It's possible to compose existing roles into new roles. For example, we can
+have a C<HandleWithCare> class which applies both the C<Breakable> and
+C<Package> roles to any class which consumes it:
+
+  package HandleWithCare;
+
+  use Moose::Role;
+
+  with 'Breakable', 'Package';
+
 =head1 REQUIRED METHODS
 
 As mentioned previously, a role can require that consuming classes
@@ -187,6 +198,7 @@ As mentioned before, a role's required method may also be satisfied by an
 attribute accessor. However, the call to C<has> which defines an attribute
 happens at runtime. This means that you must define the attribute I<before>
 consuming the role, or else the role will not see the generated accessor.
+These attributes are L<Moose Attributes|Moose::Manual::Attributes>.
 
   package Breakable;
 
@@ -237,7 +249,7 @@ class is required to provide its I<own> method of the same name.
 
   package Breakdancer;
 
-  use Moose::Role
+  use Moose::Role;
 
   sub break {
 
@@ -261,6 +273,9 @@ A role can be a collection of other roles:
   use Moose::Role;
 
   with ('Breakable', 'Breakdancer');
+
+When a role consumes another a role, the I<consuming> role's methods silently
+win in any conflict, and the consumed role's methods are simply ignored.
 
 =head1 METHOD EXCLUSION AND ALIASING
 
@@ -302,6 +317,24 @@ then provide a method of the same name in the class itself.
 
 Also see L<Moose::Cookbook::Roles::Restartable_AdvancedComposition> for an example.
 
+=head1 OVERLOADING
+
+When a Moose role uses overloading, that overloading is composed into any
+classes that consume the role. This includes the setting of the C<fallback>
+value for that role's overloading. Just as with methods and attributes, when a
+role consumes another role, that other role's overloading settings are applied
+to the role.
+
+Just as with methods, there can be conflicts with overloading implementations
+between multiple roles when they are all consumed by a class. If two roles
+both provide different overloading implementations for a given operator, that
+is a conflict. If two roles both implement overloading and have different
+C<fallback> values, that is also considered a conflict. These conflicts are
+detected when multiple roles are being composed into a class together.
+
+When a role consumes another role, the consuming role's overloading fallback
+and operator implementations silently "win" the conflict.
+
 =head1 ROLE EXCLUSION
 
 A role can say that it cannot be combined with some other role. This
@@ -334,19 +367,57 @@ normal Moose role combination system. We recommend using this function to
 apply roles to an object. This is what Moose uses internally when you call
 C<with>.
 
-=head1 AUTHOR
+=head1 AUTHORS
 
-Moose is maintained by the Moose Cabal, along with the help of many contributors. See L<Moose/CABAL> and L<Moose/CONTRIBUTORS> for details.
+=over 4
+
+=item *
+
+Stevan Little <stevan.little@iinteractive.com>
+
+=item *
+
+Dave Rolsky <autarch@urth.org>
+
+=item *
+
+Jesse Luehrs <doy@tozt.net>
+
+=item *
+
+Shawn M Moore <code@sartak.org>
+
+=item *
+
+יובל קוג'מן (Yuval Kogman) <nothingmuch@woobling.org>
+
+=item *
+
+Karen Etheridge <ether@cpan.org>
+
+=item *
+
+Florian Ragwitz <rafl@debian.org>
+
+=item *
+
+Hans Dieter Pearcey <hdp@weftsoar.net>
+
+=item *
+
+Chris Prather <chris@prather.org>
+
+=item *
+
+Matt S Trout <mst@shadowcat.co.uk>
+
+=back
 
 =head1 COPYRIGHT AND LICENSE
 
-This software is copyright (c) 2012 by Infinity Interactive, Inc..
+This software is copyright (c) 2006 by Infinity Interactive, Inc..
 
 This is free software; you can redistribute it and/or modify it under
 the same terms as the Perl 5 programming language system itself.
 
 =cut
-
-
-__END__
-

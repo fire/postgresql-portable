@@ -3,7 +3,7 @@ package Socket;
 use strict;
 { use 5.006001; }
 
-our $VERSION = '2.009';
+our $VERSION = '2.021';
 
 =head1 NAME
 
@@ -107,6 +107,10 @@ C<SOL_SOCKET> level.
 
 Socket option name constants for IPv4 socket options at the C<IPPROTO_IP>
 level.
+
+=head2 IPTOS_LOWDELAY, IPTOS_THROUGHPUT, IPTOS_RELIABILITY, ...
+
+Socket option value constants for C<IP_TOS> socket option.
 
 =head2 MSG_BCAST, MSG_OOB, MSG_TRUNC, ...
 
@@ -380,7 +384,7 @@ Restrict to only generating addresses for this protocol
 The return value will be a list; the first value being an error indication,
 followed by a list of address structures (if no error occurred).
 
-The error value will be a dualvar; comparable to the C<EI_*> error constants,
+The error value will be a dualvar; comparable to the C<EAI_*> error constants,
 or printable as a human-readable error message string. If no error occurred it
 will be zero numerically and an empty string.
 
@@ -448,7 +452,7 @@ constants, or defaults to 0 if unspecified.
 The return value will be a list; the first value being an error condition,
 followed by the hostname and service name.
 
-The error value will be a dualvar; comparable to the C<EI_*> error constants,
+The error value will be a dualvar; comparable to the C<EAI_*> error constants,
 or printable as a human-readable error message string. The host and service
 names will be plain strings.
 
@@ -578,8 +582,8 @@ service on the named host.
  print <$sock>;
 
 Because a list of potential candidates is returned, the C<while> loop tries
-each in turn until it it finds one that succeeds both the socket() and
-connect() calls.
+each in turn until it finds one that succeeds both the socket() and connect()
+calls.
 
 This function performs the work of the legacy functions gethostbyname(),
 getservbyname(), inet_aton() and pack_sockaddr_in().
@@ -722,7 +726,7 @@ our @EXPORT = qw(
 	IP_RETOPTS
 
 	MSG_BCAST MSG_BTAG MSG_CTLFLAGS MSG_CTLIGNORE MSG_CTRUNC MSG_DONTROUTE
-	MSG_DONTWAIT MSG_EOF MSG_EOR MSG_ERRQUEUE MSG_ETAG MSG_FIN
+	MSG_DONTWAIT MSG_EOF MSG_EOR MSG_ERRQUEUE MSG_ETAG MSG_FASTOPEN MSG_FIN
 	MSG_MAXIOVLEN MSG_MCAST MSG_NOSIGNAL MSG_OOB MSG_PEEK MSG_PROXY MSG_RST
 	MSG_SYN MSG_TRUNC MSG_URG MSG_WAITALL MSG_WIRE
 
@@ -756,14 +760,17 @@ our @EXPORT_OK = qw(
 	IP_DROP_SOURCE_MEMBERSHIP IP_MULTICAST_IF IP_MULTICAST_LOOP
 	IP_MULTICAST_TTL
 
-	IPPROTO_IP IPPROTO_IPV6 IPPROTO_RAW IPPROTO_ICMP IPPROTO_TCP
-	IPPROTO_UDP
+	IPPROTO_IP IPPROTO_IPV6 IPPROTO_RAW IPPROTO_ICMP IPPROTO_IGMP
+	IPPROTO_TCP IPPROTO_UDP IPPROTO_GRE IPPROTO_ESP IPPROTO_AH
+	IPPROTO_SCTP
 
-	TCP_CONGESTION TCP_CONNECTIONTIMEOUT TCP_CORK TCP_DEFER_ACCEPT TCP_INFO
-	TCP_INIT_CWND TCP_KEEPALIVE TCP_KEEPCNT TCP_KEEPIDLE TCP_KEEPINTVL
-	TCP_LINGER2 TCP_MAXRT TCP_MAXSEG TCP_MD5SIG TCP_NODELAY TCP_NOOPT
-	TCP_NOPUSH TCP_QUICKACK TCP_SACK_ENABLE TCP_STDURG TCP_SYNCNT
-	TCP_WINDOW_CLAMP
+	IPTOS_LOWDELAY IPTOS_THROUGHPUT IPTOS_RELIABILITY IPTOS_MINCOST
+
+	TCP_CONGESTION TCP_CONNECTIONTIMEOUT TCP_CORK TCP_DEFER_ACCEPT
+	TCP_FASTOPEN TCP_INFO TCP_INIT_CWND TCP_KEEPALIVE TCP_KEEPCNT
+	TCP_KEEPIDLE TCP_KEEPINTVL TCP_LINGER2 TCP_MAXRT TCP_MAXSEG
+	TCP_MD5SIG TCP_NODELAY TCP_NOOPT TCP_NOPUSH TCP_QUICKACK
+	TCP_SACK_ENABLE TCP_STDURG TCP_SYNCNT TCP_WINDOW_CLAMP
 
 	IN6ADDR_ANY IN6ADDR_LOOPBACK
 
@@ -929,7 +936,7 @@ if( defined &getaddrinfo ) {
 # family
 
 # Borrowed from Regexp::Common::net
-my $REGEXP_IPv4_DECIMAL = qr/25[0-5]|2[0-4][0-9]|1?[0-9][0-9]{1,2}/;
+my $REGEXP_IPv4_DECIMAL = qr/25[0-5]|2[0-4][0-9]|[0-1]?[0-9]{1,2}/;
 my $REGEXP_IPv4_DOTTEDQUAD = qr/$REGEXP_IPv4_DECIMAL\.$REGEXP_IPv4_DECIMAL\.$REGEXP_IPv4_DECIMAL\.$REGEXP_IPv4_DECIMAL/;
 
 sub fake_makeerr
@@ -992,7 +999,7 @@ sub fake_getaddrinfo
     my @ports; # Actually ARRAYrefs of [ socktype, protocol, port ]
     my $protname = "";
     if( $protocol ) {
-	$protname = getprotobynumber( $protocol );
+	$protname = eval { getprotobynumber( $protocol ) };
     }
 
     if( $service ne "" and $service !~ m/^\d+$/ ) {
@@ -1023,7 +1030,7 @@ sub fake_getaddrinfo
 	    $port = 0;
 	}
 
-	push @ports, [ $this_socktype, scalar getprotobyname( $this_protname ) || 0, $port ];
+	push @ports, [ $this_socktype, eval { scalar getprotobyname( $this_protname ) } || 0, $port ];
     }
 
     my @ret;

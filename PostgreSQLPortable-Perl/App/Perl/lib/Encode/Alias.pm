@@ -2,10 +2,10 @@ package Encode::Alias;
 use strict;
 use warnings;
 no warnings 'redefine';
-our $VERSION = do { my @r = ( q$Revision: 2.16 $ =~ /\d+/g ); sprintf "%d." . "%02d" x $#r, @r };
+our $VERSION = do { my @r = ( q$Revision: 2.19 $ =~ /\d+/g ); sprintf "%d." . "%02d" x $#r, @r };
 use constant DEBUG => !!$ENV{PERL_ENCODE_DEBUG};
 
-use base qw(Exporter);
+use Exporter 'import';
 
 # Public, encouraged API is exported by default
 
@@ -211,7 +211,7 @@ sub init_aliases {
     define_alias( qr/^macintosh$/i => '"MacRoman"' );
     # https://rt.cpan.org/Ticket/Display.html?id=78125
     define_alias( qr/^macce$/i => '"MacCentralEurRoman"' );
-    # Ououououou. gone.  They are differente!
+    # Ououououou. gone.  They are different!
     # define_alias( qr/\bmacRomanian$/i => '"macRumanian"');
 
     # Standardize on the dashed versions.
@@ -255,6 +255,10 @@ sub init_aliases {
         define_alias( qr/\bbig5-?hk(?:scs)?$/i    => '"big5-hkscs"' );
         define_alias( qr/\bhk(?:scs)?[-_]?big5$/i => '"big5-hkscs"' );
     }
+
+    # https://github.com/dankogai/p5-encode/issues/37
+    define_alias(qr/cp65000/i => '"UTF-7"');
+    define_alias(qr/cp65001/i => '"utf-8-strict"');
 
     # utf8 is blessed :)
     define_alias( qr/\bUTF-8$/i => '"utf-8-strict"' );
@@ -338,7 +342,7 @@ As of Encode 1.87, the older form
 
 no longer works. 
 
-Encode up to 1.86 internally used "local $_" to implement ths older
+Encode up to 1.86 internally used "local $_" to implement this older
 form.  But consider the code below;
 
   use Encode;

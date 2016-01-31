@@ -1,6 +1,6 @@
 package attributes;
 
-our $VERSION = 0.19;
+our $VERSION = 0.23;
 
 @EXPORT_OK = qw(get reftype);
 @EXPORT = ();
@@ -238,11 +238,41 @@ Indicates that the referenced subroutine
 is a method.  A subroutine so marked
 will not trigger the "Ambiguous call resolved as CORE::%s" warning.
 
+=item prototype(..)
+
+The "prototype" attribute is an alternate means of specifying a prototype
+on a sub.  The desired prototype is within the parens.
+
+The prototype from the attribute is assigned to the sub immediately after
+the prototype from the sub, which means that if both are declared at the
+same time, the traditionally defined prototype is ignored.  In other words,
+C<sub foo($$) : prototype(@) {}> is indistinguishable from C<sub foo(@){}>.
+
+If illegalproto warnings are enabled, the prototype declared inside this
+attribute will be sanity checked at compile time.
+
 =item locked
 
-The "locked" attribute has no effect in
-5.10.0 and later.  It was used as part
-of the now-removed "Perl 5.005 threads".
+The "locked" attribute is deprecated, and has no effect in 5.10.0 and later.
+It was used as part of the now-removed "Perl 5.005 threads".
+
+=back
+
+The following are the built-in attributes for variables:
+
+=over 4
+
+=item shared
+
+Indicates that the referenced variable can be shared across different threads
+when used in conjunction with the L<threads> and L<threads::shared> modules.
+
+=item unique
+
+The "unique" attribute is deprecated, and has no effect in 5.10.0 and later.
+It used to indicate that a single copy of an C<our> variable was to be used by
+all interpreters should the program happen to be running in a
+multi-interpreter environment.
 
 =back
 

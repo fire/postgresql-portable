@@ -1,4 +1,4 @@
-# Implementtion of a pure-perl on_scope_end for perl 5.8.X
+# Implementation of a pure-perl on_scope_end for perl 5.8.X
 # (relies on lack of compile/runtime duality of %^H before 5.10
 # which makes guard object operation possible)
 
@@ -7,6 +7,9 @@ package # hide from the pauses
 
 use strict;
 use warnings;
+
+our $VERSION = '0.15';
+
 use Scalar::Util ();
 
 # This is the original implementation, which sadly is broken
@@ -37,36 +40,3 @@ sub DESTROY {
 }
 
 1;
-
-__END__
-=pod
-
-=encoding utf-8
-
-=head1 NAME
-
-B::Hooks::EndOfScope::PP::HintHash
-
-=head1 AUTHORS
-
-=over 4
-
-=item *
-
-Florian Ragwitz <rafl@debian.org>
-
-=item *
-
-Peter Rabbitson <ribasushi@cpan.org>
-
-=back
-
-=head1 COPYRIGHT AND LICENSE
-
-This software is copyright (c) 2012 by Florian Ragwitz.
-
-This is free software; you can redistribute it and/or modify it under
-the same terms as the Perl 5 programming language system itself.
-
-=cut
-

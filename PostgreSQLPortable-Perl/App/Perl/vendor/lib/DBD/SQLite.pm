@@ -5,40 +5,33 @@ use strict;
 use DBI   1.57 ();
 use DynaLoader ();
 
-use vars qw($VERSION @ISA);
-use vars qw{$err $errstr $drh $sqlite_version $sqlite_version_number};
-use vars qw{%COLLATION};
+our $VERSION = '1.48';
+our @ISA     = 'DynaLoader';
 
-BEGIN {
-    $VERSION = '1.37';
-    @ISA     = 'DynaLoader';
+# sqlite_version cache (set in the XS bootstrap)
+our ($sqlite_version, $sqlite_version_number);
 
-    # Initialize errors
-    $err     = undef;
-    $errstr  = undef;
-
-    # Driver singleton
-    $drh = undef;
-
-    # sqlite_version cache
-    $sqlite_version = undef;
-}
+# not sure if we still need these...
+our ($err, $errstr);
 
 __PACKAGE__->bootstrap($VERSION);
 
 # New or old API?
 use constant NEWAPI => ($DBI::VERSION >= 1.608);
 
+# global registry of collation functions, initialized with 2 builtins
+our %COLLATION;
 tie %COLLATION, 'DBD::SQLite::_WriteOnceHash';
 $COLLATION{perl}       = sub { $_[0] cmp $_[1] };
 $COLLATION{perllocale} = sub { use locale; $_[0] cmp $_[1] };
 
+our $drh;
 my $methods_are_installed = 0;
 
 sub driver {
     return $drh if $drh;
 
-    if (!$methods_are_installed && $DBI::VERSION >= 1.608) {
+    if (!$methods_are_installed && DBD::SQLite::NEWAPI ) {
         DBI->setup_driver('DBD::SQLite');
 
         DBD::SQLite::db->install_method('sqlite_last_insert_rowid');
@@ -55,9 +48,15 @@ sub driver {
         DBD::SQLite::db->install_method('sqlite_backup_from_file');
         DBD::SQLite::db->install_method('sqlite_backup_to_file');
         DBD::SQLite::db->install_method('sqlite_enable_load_extension');
+        DBD::SQLite::db->install_method('sqlite_load_extension');
         DBD::SQLite::db->install_method('sqlite_register_fts3_perl_tokenizer');
-        DBD::SQLite::db->install_method('sqlite_trace');
-        DBD::SQLite::db->install_method('sqlite_profile');
+        DBD::SQLite::db->install_method('sqlite_trace', { O => 0x0004 });
+        DBD::SQLite::db->install_method('sqlite_profile', { O => 0x0004 });
+        DBD::SQLite::db->install_method('sqlite_table_column_metadata', { O => 0x0004 });
+        DBD::SQLite::db->install_method('sqlite_db_filename', { O => 0x0004 });
+        DBD::SQLite::db->install_method('sqlite_db_status', { O => 0x0004 });
+        DBD::SQLite::st->install_method('sqlite_st_status', { O => 0x0004 });
+        DBD::SQLite::db->install_method('sqlite_create_module');
 
         $methods_are_installed++;
     }
@@ -76,7 +75,8 @@ sub CLONE {
 }
 
 
-package DBD::SQLite::dr;
+package # hide from PAUSE
+    DBD::SQLite::dr;
 
 sub connect {
     my ($drh, $dbname, $user, $auth, $attr) = @_;
@@ -96,25 +96,30 @@ sub connect {
             my ($key, $value) = split(/=/, $attrib, 2);
             if ( $key =~ /^(?:db(?:name)?|database)$/ ) {
                 $real = $value;
+            } elsif ( $key eq 'uri' ) {
+                $real = $value;
+                $attr->{sqlite_open_flags} |= DBD::SQLite::OPEN_URI();
             } else {
                 $attr->{$key} = $value;
             }
         }
     }
 
+    if (my $flags = $attr->{sqlite_open_flags}) {
+        unless ($flags & (DBD::SQLite::OPEN_READONLY() | DBD::SQLite::OPEN_READWRITE())) {
+            $attr->{sqlite_open_flags} |= DBD::SQLite::OPEN_READWRITE() | DBD::SQLite::OPEN_CREATE();
+        }
+    }
+
     # To avoid unicode and long file name problems on Windows,
     # convert to the shortname if the file (or parent directory) exists.
-    if ( $^O =~ /MSWin32/ and $real ne ':memory:' and $real ne '') {
-        require Win32;
+    if ( $^O =~ /MSWin32/ and $real ne ':memory:' and $real ne '' and $real !~ /^file:/ and !-f $real ) {
         require File::Basename;
         my ($file, $dir, $suffix) = File::Basename::fileparse($real);
-        my $short = Win32::GetShortPathName($real);
-        if ( $short && -f $short ) {
-            # Existing files will work directly.
-            $real = $short;
-        } elsif ( -d $dir ) {
-            # We are creating a new file.
-            # Does the directory it's in at least exist?
+        # We are creating a new file.
+        # Does the directory it's in at least exist?
+        if ( -d $dir ) {
+            require Win32;
             $real = join '', grep { defined } Win32::GetShortPathName($dir), $file, $suffix;
         } else {
             # SQLite can't do mkpath anyway.
@@ -182,7 +187,8 @@ sub regexp {
     return scalar($_[1] =~ $_[0]);
 }
 
-package DBD::SQLite::db;
+package # hide from PAUSE
+    DBD::SQLite::db;
 
 sub prepare {
     my $dbh = shift;
@@ -201,6 +207,16 @@ sub prepare {
 sub do {
     my ($dbh, $statement, $attr, @bind_values) = @_;
 
+    # shortcut
+    if  (defined $statement && !defined $attr && !@bind_values) {
+        # _do() (i.e. sqlite3_exec()) runs semicolon-separate SQL
+        # statements, which is handy but insecure sometimes.
+        # Use this only when it's safe or explicitly allowed.
+        if (index($statement, ';') == -1 or $dbh->FETCH('sqlite_allow_multiple_statements')) {
+            return DBD::SQLite::db::_do($dbh, $statement);
+        }
+    }
+
     my @copy = @{[@bind_values]};
     my $rows = 0;
 
@@ -215,6 +231,17 @@ sub do {
 
     # always return true if no error
     return ($rows == 0) ? "0E0" : $rows;
+}
+
+sub ping {
+    my $dbh = shift;
+
+    # $file may be undef (ie. in-memory/temporary database)
+    my $file = DBD::SQLite::NEWAPI ? $dbh->sqlite_db_filename
+                                   : $dbh->func("db_filename");
+
+    return 0 if $file && !-f $file;
+    return $dbh->FETCH('Active') ? 1 : 0;
 }
 
 sub _get_version {
@@ -296,7 +323,8 @@ SELECT NULL TABLE_CAT
 FROM (
      SELECT 'TABLE' tt                  UNION
      SELECT 'VIEW' tt                   UNION
-     SELECT 'LOCAL TEMPORARY' tt
+     SELECT 'LOCAL TEMPORARY' tt        UNION
+     SELECT 'SYSTEM TABLE' tt
 ) t
 ORDER BY TABLE_TYPE
 END_SQL
@@ -368,45 +396,96 @@ END_SQL
 sub primary_key_info {
     my ($dbh, $catalog, $schema, $table, $attr) = @_;
 
-    # Escape the schema and table name
-    $schema =~ s/([\\_%])/\\$1/g if defined $schema;
-    my $escaped = $table;
-    $escaped =~ s/([\\_%])/\\$1/g;
-    $attr ||= {};
-    $attr->{Escape} = '\\';
-    my $sth_tables = $dbh->table_info($catalog, $schema, $escaped, undef, $attr);
+    my $databases = $dbh->selectall_arrayref("PRAGMA database_list", {Slice => {}});
 
-    # This is a hack but much simpler than using pragma index_list etc
-    # also the pragma doesn't list 'INTEGER PRIMARY KEY' autoinc PKs!
     my @pk_info;
-    while ( my $row = $sth_tables->fetchrow_hashref ) {
-        my $sql = $row->{sqlite_sql} or next;
-        next unless $sql =~ /(.*?)\s*PRIMARY\s+KEY\s*(?:\(\s*(.*?)\s*\))?/si;
-        my @pk = split /\s*,\s*/, $2 || '';
-        unless ( @pk ) {
-            my $prefix = $1;
-            $prefix =~ s/.*create\s+table\s+.*?\(\s*//si;
-            $prefix = (split /\s*,\s*/, $prefix)[-1];
-            @pk = (split /\s+/, $prefix)[0]; # take first word as name
-        }
-        my $key_seq = 0;
-        foreach my $pk_field (@pk) {
-            $pk_field =~ s/(["'`])(.+)\1/$2/; # dequote
-            $pk_field =~ s/\[(.+)\]/$1/; # dequote
-            push @pk_info, {
-                TABLE_SCHEM => $row->{TABLE_SCHEM},
-                TABLE_NAME  => $row->{TABLE_NAME},
-                COLUMN_NAME => $pk_field,
-                KEY_SEQ     => ++$key_seq,
-                PK_NAME     => 'PRIMARY KEY',
-            };
+    for my $database (@$databases) {
+        my $dbname = $database->{name};
+        next if defined $schema && $schema ne '%' && $schema ne $dbname;
+
+        my $quoted_dbname = $dbh->quote_identifier($dbname);
+
+        my $master_table =
+            ($dbname eq 'main') ? 'sqlite_master' :
+            ($dbname eq 'temp') ? 'sqlite_temp_master' :
+            $quoted_dbname.'.sqlite_master';
+
+        my $sth = $dbh->prepare("SELECT name, sql FROM $master_table WHERE type = ?");
+        $sth->execute("table");
+        while(my $row = $sth->fetchrow_hashref) {
+            my $tbname = $row->{name};
+            next if defined $table && $table ne '%' && $table ne $tbname;
+
+            my $quoted_tbname = $dbh->quote_identifier($tbname);
+            my $t_sth = $dbh->prepare("PRAGMA $quoted_dbname.table_info($quoted_tbname)");
+            $t_sth->execute;
+            my @pk;
+            while(my $col = $t_sth->fetchrow_hashref) {
+                push @pk, $col->{name} if $col->{pk};
+            }
+
+            # If there're multiple primary key columns, we need to
+            # find their order from one of the auto-generated unique
+            # indices (note that single column integer primary key
+            # doesn't create an index).
+            if (@pk > 1 and $row->{sql} =~ /\bPRIMARY\s+KEY\s*\(\s*
+                (
+                    (?:
+                        (
+                            [a-z_][a-z0-9_]*
+                          | (["'`])(?:\3\3|(?!\3).)+?\3(?!\3)
+                          | \[[^\]]+\]
+                        )
+                        \s*,\s*
+                    )+
+                    (
+                        [a-z_][a-z0-9_]*
+                      | (["'`])(?:\5\5|(?!\5).)+?\5(?!\5)
+                      | \[[^\]]+\]
+                    )
+                )
+                    \s*\)/six) {
+                my $pk_sql = $1;
+                @pk = ();
+                while($pk_sql =~ /
+                    (
+                        [a-z_][a-z0-9_]*
+                      | (["'`])(?:\2\2|(?!\2).)+?\2(?!\2)
+                      | \[([^\]]+)\]
+                    )
+                    (?:\s*,\s*|$)
+                        /sixg) {
+                    my($col, $quote, $brack) = ($1, $2, $3);
+                    if ( defined $quote ) {
+                        # Dequote "'`
+                        $col = substr $col, 1, -1;
+                        $col =~ s/$quote$quote/$quote/g;
+                    } elsif ( defined $brack ) {
+                        # Dequote []
+                        $col = $brack;
+                    }
+                    push @pk, $col;
+                }
+            }
+
+            my $key_name = $row->{sql} =~ /\bCONSTRAINT\s+(\S+|"[^"]+")\s+PRIMARY\s+KEY\s*\(/i ? $1 : 'PRIMARY KEY';
+            my $key_seq = 0;
+            foreach my $pk_field (@pk) {
+                push @pk_info, {
+                    TABLE_SCHEM => $dbname,
+                    TABLE_NAME  => $tbname,
+                    COLUMN_NAME => $pk_field,
+                    KEY_SEQ     => ++$key_seq,
+                    PK_NAME     => $key_name,
+                };
+            }
         }
     }
 
     my $sponge = DBI->connect("DBI:Sponge:", '','')
         or return $dbh->DBI::set_err($DBI::err, "DBI::Sponge: $DBI::errstr");
     my @names = qw(TABLE_CAT TABLE_SCHEM TABLE_NAME COLUMN_NAME KEY_SEQ PK_NAME);
-    my $sth = $sponge->prepare( "primary_key_info $table", {
+    my $sth = $sponge->prepare( "primary_key_info", {
         rows          => [ map { [ @{$_}{@names} ] } @pk_info ],
         NUM_OF_FIELDS => scalar @names,
         NAME          => \@names,
@@ -415,6 +494,230 @@ sub primary_key_info {
         $sponge->errstr,
     );
     return $sth;
+}
+
+
+our %DBI_code_for_rule = ( # from DBI doc; curiously, they are not exported
+                           # by the DBI module.
+  # codes for update/delete constraints
+  'CASCADE'             => 0,
+  'RESTRICT'            => 1,
+  'SET NULL'            => 2,
+  'NO ACTION'           => 3,
+  'SET DEFAULT'         => 4,
+
+  # codes for deferrability
+  'INITIALLY DEFERRED'  => 5,
+  'INITIALLY IMMEDIATE' => 6,
+  'NOT DEFERRABLE'      => 7,
+ );
+
+
+my @FOREIGN_KEY_INFO_ODBC = (
+  'PKTABLE_CAT',       # The primary (unique) key table catalog identifier.
+  'PKTABLE_SCHEM',     # The primary (unique) key table schema identifier.
+  'PKTABLE_NAME',      # The primary (unique) key table identifier.
+  'PKCOLUMN_NAME',     # The primary (unique) key column identifier.
+  'FKTABLE_CAT',       # The foreign key table catalog identifier.
+  'FKTABLE_SCHEM',     # The foreign key table schema identifier.
+  'FKTABLE_NAME',      # The foreign key table identifier.
+  'FKCOLUMN_NAME',     # The foreign key column identifier.
+  'KEY_SEQ',           # The column sequence number (starting with 1).
+  'UPDATE_RULE',       # The referential action for the UPDATE rule.
+  'DELETE_RULE',       # The referential action for the DELETE rule.
+  'FK_NAME',           # The foreign key name.
+  'PK_NAME',           # The primary (unique) key name.
+  'DEFERRABILITY',     # The deferrability of the foreign key constraint.
+  'UNIQUE_OR_PRIMARY', # qualifies the key referenced by the foreign key
+);
+
+# Column names below are not used, but listed just for completeness's sake.
+# Maybe we could add an option so that the user can choose which field
+# names will be returned; the DBI spec is not very clear about ODBC vs. CLI.
+my @FOREIGN_KEY_INFO_SQL_CLI = qw(
+  UK_TABLE_CAT 
+  UK_TABLE_SCHEM
+  UK_TABLE_NAME
+  UK_COLUMN_NAME
+  FK_TABLE_CAT
+  FK_TABLE_SCHEM
+  FK_TABLE_NAME
+  FK_COLUMN_NAME
+  ORDINAL_POSITION
+  UPDATE_RULE
+  DELETE_RULE
+  FK_NAME
+  UK_NAME
+  DEFERABILITY
+  UNIQUE_OR_PRIMARY
+ );
+
+sub foreign_key_info {
+    my ($dbh, $pk_catalog, $pk_schema, $pk_table, $fk_catalog, $fk_schema, $fk_table) = @_;
+
+    my $databases = $dbh->selectall_arrayref("PRAGMA database_list", {Slice => {}});
+
+    my @fk_info;
+    my %table_info;
+    for my $database (@$databases) {
+        my $dbname = $database->{name};
+        next if defined $fk_schema && $fk_schema ne '%' && $fk_schema ne $dbname;
+
+        my $quoted_dbname = $dbh->quote_identifier($dbname);
+        my $master_table =
+            ($dbname eq 'main') ? 'sqlite_master' :
+            ($dbname eq 'temp') ? 'sqlite_temp_master' :
+            $quoted_dbname.'.sqlite_master';
+
+        my $tables = $dbh->selectall_arrayref("SELECT name FROM $master_table WHERE type = ?", undef, "table");
+        for my $table (@$tables) {
+            my $tbname = $table->[0];
+            next if defined $fk_table && $fk_table ne '%' && $fk_table ne $tbname;
+
+            my $quoted_tbname = $dbh->quote_identifier($tbname);
+            my $sth = $dbh->prepare("PRAGMA $quoted_dbname.foreign_key_list($quoted_tbname)");
+            $sth->execute;
+            while(my $row = $sth->fetchrow_hashref) {
+                next if defined $pk_table && $pk_table ne '%' && $pk_table ne $row->{table};
+
+                unless ($table_info{$row->{table}}) {
+                    my $quoted_tb = $dbh->quote_identifier($row->{table});
+                    for my $db (@$databases) {
+                        my $quoted_db = $dbh->quote_identifier($db->{name});
+                        my $t_sth = $dbh->prepare("PRAGMA $quoted_db.table_info($quoted_tb)");
+                        $t_sth->execute;
+                        my $cols = {};
+                        while(my $r = $t_sth->fetchrow_hashref) {
+                            $cols->{$r->{name}} = $r->{pk};
+                        }
+                        if (keys %$cols) {
+                            $table_info{$row->{table}} = {
+                                schema  => $db->{name},
+                                columns => $cols,
+                            };
+                            last;
+                        }
+                    }
+                }
+
+                next if defined $pk_schema && $pk_schema ne '%' && $pk_schema ne $table_info{$row->{table}}{schema};
+
+                push @fk_info, {
+                    PKTABLE_CAT   => undef,
+                    PKTABLE_SCHEM => $table_info{$row->{table}}{schema},
+                    PKTABLE_NAME  => $row->{table},
+                    PKCOLUMN_NAME => $row->{to},
+                    FKTABLE_CAT   => undef,
+                    FKTABLE_SCHEM => $dbname,
+                    FKTABLE_NAME  => $tbname,
+                    FKCOLUMN_NAME => $row->{from},
+                    KEY_SEQ       => $row->{seq} + 1,
+                    UPDATE_RULE   => $DBI_code_for_rule{$row->{on_update}},
+                    DELETE_RULE   => $DBI_code_for_rule{$row->{on_delete}},
+                    FK_NAME       => undef,
+                    PK_NAME       => undef,
+                    DEFERRABILITY => undef,
+                    UNIQUE_OR_PRIMARY => $table_info{$row->{table}}{columns}{$row->{to}} ? 'PRIMARY' : 'UNIQUE',
+                };
+            }
+        }
+    }
+
+    my $sponge_dbh = DBI->connect("DBI:Sponge:", "", "")
+        or return $dbh->DBI::set_err($DBI::err, "DBI::Sponge: $DBI::errstr");
+    my $sponge_sth = $sponge_dbh->prepare("foreign_key_info", {
+        NAME          => \@FOREIGN_KEY_INFO_ODBC,
+        rows          => [ map { [@{$_}{@FOREIGN_KEY_INFO_ODBC} ] } @fk_info ],
+        NUM_OF_FIELDS => scalar(@FOREIGN_KEY_INFO_ODBC),
+    }) or return $dbh->DBI::set_err(
+        $sponge_dbh->err,
+        $sponge_dbh->errstr,
+    );
+    return $sponge_sth;
+}
+
+my @STATISTICS_INFO_ODBC = (
+  'TABLE_CAT',        # The catalog identifier.
+  'TABLE_SCHEM',      # The schema identifier.
+  'TABLE_NAME',       # The table identifier.
+  'NON_UNIQUE',       # Unique index indicator.
+  'INDEX_QUALIFIER',  # Index qualifier identifier.
+  'INDEX_NAME',       # The index identifier.
+  'TYPE',             # The type of information being returned.
+  'ORDINAL_POSITION', # Column sequence number (starting with 1).
+  'COLUMN_NAME',      # The column identifier.
+  'ASC_OR_DESC',      # Column sort sequence.
+  'CARDINALITY',      # Cardinality of the table or index.
+  'PAGES',            # Number of storage pages used by this table or index.
+  'FILTER_CONDITION', # The index filter condition as a string.
+);
+
+sub statistics_info {
+    my ($dbh, $catalog, $schema, $table, $unique_only, $quick) = @_;
+
+    my $databases = $dbh->selectall_arrayref("PRAGMA database_list", {Slice => {}});
+
+    my @statistics_info;
+    for my $database (@$databases) {
+        my $dbname = $database->{name};
+        next if defined $schema && $schema ne '%' && $schema ne $dbname;
+
+        my $quoted_dbname = $dbh->quote_identifier($dbname);
+        my $master_table =
+            ($dbname eq 'main') ? 'sqlite_master' :
+            ($dbname eq 'temp') ? 'sqlite_temp_master' :
+            $quoted_dbname.'.sqlite_master';
+
+        my $tables = $dbh->selectall_arrayref("SELECT name FROM $master_table WHERE type = ?", undef, "table");
+        for my $table_ref (@$tables) {
+            my $tbname = $table_ref->[0];
+            next if defined $table && $table ne '%' && $table ne $tbname;
+
+            my $quoted_tbname = $dbh->quote_identifier($tbname);
+            my $sth = $dbh->prepare("PRAGMA $quoted_dbname.index_list($quoted_tbname)");
+            $sth->execute;
+            while(my $row = $sth->fetchrow_hashref) {
+
+                next if defined $unique_only && $unique_only && $row->{unique};
+                my $quoted_idx = $dbh->quote_identifier($row->{name});
+                for my $db (@$databases) {
+                    my $quoted_db = $dbh->quote_identifier($db->{name});
+                    my $i_sth = $dbh->prepare("PRAGMA $quoted_db.index_info($quoted_idx)");
+                    $i_sth->execute;
+                    my $cols = {};
+                    while(my $info = $i_sth->fetchrow_hashref) {
+                        push @statistics_info, {
+                            TABLE_CAT   => undef,
+                            TABLE_SCHEM => $db->{name},
+                            TABLE_NAME  => $tbname,
+                            NON_UNIQUE    => $row->{unique} ? 0 : 1, 
+                            INDEX_QUALIFIER => undef,
+                            INDEX_NAME      => $row->{name},
+                            TYPE            => 'btree', # see http://www.sqlite.org/version3.html esp. "Traditional B-trees are still used for indices"
+                            ORDINAL_POSITION => $info->{seqno} + 1,
+                            COLUMN_NAME      => $info->{name},
+                            ASC_OR_DESC      => undef,
+                            CARDINALITY      => undef,
+                            PAGES            => undef,
+                            FILTER_CONDITION => undef,
+                       };
+                    }
+                }
+            }
+        }
+    }
+
+    my $sponge_dbh = DBI->connect("DBI:Sponge:", "", "")
+        or return $dbh->DBI::set_err($DBI::err, "DBI::Sponge: $DBI::errstr");
+    my $sponge_sth = $sponge_dbh->prepare("statistics_info", {
+        NAME          => \@STATISTICS_INFO_ODBC,
+        rows          => [ map { [@{$_}{@STATISTICS_INFO_ODBC} ] } @statistics_info ],
+        NUM_OF_FIELDS => scalar(@STATISTICS_INFO_ODBC),
+    }) or return $dbh->DBI::set_err(
+        $sponge_dbh->err,
+        $sponge_dbh->errstr,
+    );
+    return $sponge_sth;
 }
 
 sub type_info_all {
@@ -592,7 +895,8 @@ END_SQL
 # An internal tied hash package used for %DBD::SQLite::COLLATION, to
 # prevent people from unintentionally overriding globally registered collations.
 
-package DBD::SQLite::_WriteOnceHash;
+package # hide from PAUSE
+    DBD::SQLite::_WriteOnceHash;
 
 require Tie::Hash;
 
@@ -701,6 +1005,79 @@ If the filename C<$dbfile> is an empty string, then a private,
 temporary on-disk database will be created. This private database will
 be automatically deleted as soon as the database connection is closed.
 
+As of 1.41_01, you can pass URI filename (see L<http://www.sqlite.org/uri.html>)
+as well for finer control:
+
+  my $dbh = DBI->connect("dbi:SQLite:uri=file:$path_to_dbfile?mode=rwc");
+
+Note that this is not for remote SQLite database connection. You only can
+connect to a local database.
+
+You can also set sqlite_open_flags (only) when you connect to a database:
+
+  use DBD::SQLite;
+  my $dbh = DBI->connect("dbi:SQLite:$dbfile", undef, undef, {
+    sqlite_open_flags => DBD::SQLite::OPEN_READONLY,
+  });
+
+See L<http://www.sqlite.org/c3ref/open.html> for details.
+
+=head2 DBD::SQLite And File::Temp
+
+When you use L<File::Temp> to create a temporary file/directory for
+SQLite databases, you need to remember:
+
+=over 4
+
+=item tempfile may be locked exclusively
+
+You may want to use C<tempfile()> to create a temporary database
+filename for DBD::SQLite, but as noted in L<File::Temp>'s POD,
+this file may have an exclusive lock under some operating systems
+(notably Mac OSX), and result in a "database is locked" error.
+To avoid this, set EXLOCK option to false when you call tempfile().
+
+  ($fh, $filename) = tempfile($template, EXLOCK => 0);
+
+=item CLEANUP may not work unless a database is disconnected
+
+When you set CLEANUP option to true when you create a temporary
+directory with C<tempdir()> or C<newdir()>, you may have to
+disconnect databases explicitly before the temporary directory
+is gone (notably under MS Windows).
+
+=back
+
+(The above is quoted from the pod of File::Temp.)
+
+If you don't need to keep or share a temporary database,
+use ":memory:" database instead. It's much handier and cleaner
+for ordinary testing.
+
+=head2 DBD::SQLite and fork()
+
+Follow the advice in the SQLite FAQ (L<https://sqlite.org/faq.html>).
+
+=over 4
+
+Under Unix, you should not carry an open SQLite database across
+a fork() system call into the child process. Problems will result
+if you do.
+
+=back
+
+You shouldn't (re)use a database handle you created (probably to
+set up a database schema etc) before you fork(). Otherwise, you
+might see a database corruption in the worst case.
+
+If you need to fork(), (re)open a database after you fork().
+You might also want to tweak C<sqlite_busy_timeout> and
+C<sqlite_use_immediate_transaction> (see below), depending
+on your needs.
+
+If you need a higher level of concurrency than SQLite supports,
+consider using other client/server database engines.
+
 =head2 Accessing A Database With Other Tools
 
 To access the database from the command line, try using C<dbish>
@@ -807,12 +1184,26 @@ problems. Use this sparingly when you handle existing databases.
 If you handle databases created by other tools like native C<sqlite3>
 command line tool, this attribute would help you.
 
+As of 1.41_04, C<sqlite_see_if_its_a_number> works only for
+bind values with no explicit type.
+
+  my $dbh = DBI->connect('dbi:SQLite:foo', undef, undef, {
+    AutoCommit => 1,
+    RaiseError => 1,
+    sqlite_see_if_its_a_number => 1,
+  });
+  my $sth = $dbh->prepare('INSERT INTO foo VALUES(?)');
+  # '1.230' will be inserted as a text, instead of 1.23 as a number,
+  # even though sqlite_see_if_its_a_number is set.
+  $sth->bind_param(1, '1.230', SQL_VARCHAR);
+  $sth->execute;
+
 =back
 
 =head2 Placeholders
 
 SQLite supports several placeholder expressions, including C<?>
-and C<:AAAA>. Consult the L<DBI> and sqlite documentation for
+and C<:AAAA>. Consult the L<DBI> and SQLite documentation for
 details. 
 
 L<http://www.sqlite.org/lang_expr.html#varparam>
@@ -847,13 +1238,13 @@ turning the pragma off:
   $dbh->do("PRAGMA foreign_keys = OFF");
 
 As of this writing, this feature is disabled by default by the
-sqlite team, and by us, to secure backward compatibility, as
+SQLite team, and by us, to secure backward compatibility, as
 this feature may break your applications, and actually broke
 some for us. If you have used a schema with foreign key constraints
 but haven't cared them much and supposed they're always ignored for
 SQLite, be prepared, and B<please do extensive testing to ensure
 that your applications will continue to work when the foreign keys
-support is enabled by default>. It is very likely that the sqlite
+support is enabled by default>. It is very likely that the SQLite
 team will turn it default-on in the future, and we plan to do it
 NO LATER THAN they do so.
 
@@ -861,12 +1252,64 @@ See L<http://www.sqlite.org/foreignkeys.html> for details.
 
 =head2 Pragma
 
-SQLite has a set of "Pragma"s to modifiy its operation or to query
+SQLite has a set of "Pragma"s to modify its operation or to query
 for its internal data. These are specific to SQLite and are not
 likely to work with other DBD libraries, but you may find some of
-these are quite useful. DBD::SQLite actually sets some (like
-C<show_datatypes>) for you when you connect to a database.
-See L<http://www.sqlite.org/pragma.html> for details.
+these are quite useful, including:
+
+=over 4
+
+=item journal_mode
+
+You can use this pragma to change the journal mode for SQLite
+databases, maybe for better performance, or for compatibility.
+
+Its default mode is C<DELETE>, which means SQLite uses a rollback
+journal to implement transactions, and the journal is deleted
+at the conclusion of each transaction. If you use C<TRUNCATE>
+instead of C<DELETE>, the journal will be truncated, which is
+usually much faster.
+
+A C<WAL> (write-ahead log) mode is introduced as of SQLite 3.7.0.
+This mode is persistent, and it stays in effect even after
+closing and reopening the database. In other words, once the C<WAL>
+mode is set in an application or in a test script, the database
+becomes inaccessible by older clients. This tends to be an issue
+when you use a system C<sqlite3> executable under a conservative
+operating system.
+
+To fix this, You need to issue C<PRAGMA journal_mode = DELETE>
+(or C<TRUNCATE>) beforehand, or install a newer version of
+C<sqlite3>.
+
+=item legacy_file_format
+
+If you happen to need to create a SQLite database that will also
+be accessed by a very old SQLite client (prior to 3.3.0 released
+in Jan. 2006), you need to set this pragma to ON before you create
+a database.
+
+=item reverse_unordered_selects
+
+You can set this pragma to ON to reverse the order of results of
+SELECT statements without an ORDER BY clause so that you can see
+if applications are making invalid assumptions about the result
+order.
+
+Note that SQLite 3.7.15 (bundled with DBD::SQLite 1.38_02) enhanced
+its query optimizer and the order of results of a SELECT statement
+without an ORDER BY clause may be different from the one of the
+previous versions.
+
+=item synchronous
+
+You can set set this pragma to OFF to make some of the operations
+in SQLite faster with a possible risk of database corruption
+in the worst case. See also L</"Performance"> section below.
+
+=back
+
+See L<http://www.sqlite.org/pragma.html> for more details.
 
 =head2 Transactions
 
@@ -924,36 +1367,27 @@ statement, and ends by a C<COMMIT> or a <ROLLBACK>.
 
 =head2 Transaction and Database Locking
 
-Transaction by C<AutoCommit> or C<begin_work> is nice and handy, but
-sometimes you may get an annoying "database is locked" error.
-This typically happens when someone begins a transaction, and tries
-to write to a database while other person is reading from the
-database (in another transaction). You might be surprised but SQLite
-doesn't lock a database when you just begin a normal (deferred)
-transaction to maximize concurrency. It reserves a lock when you
-issue a statement to write, but until you actually try to write
-with a C<commit> statement, it allows other people to read from
-the database. However, reading from the database also requires
-C<shared lock>, and that prevents to give you the C<exclusive lock>
-you reserved, thus you get the "database is locked" error, and
-other people will get the same error if they try to write afterwards,
-as you still have a C<pending> lock. C<busy_timeout> doesn't help
-in this case.
+The default transaction behavior of SQLite is C<deferred>, that
+means, locks are not acquired until the first read or write
+operation, and thus it is possible that another thread or process
+could create a separate transaction and write to the database after
+the C<BEGIN> on the current thread has executed, and eventually
+cause a "deadlock". To avoid this, DBD::SQLite internally issues
+a C<BEGIN IMMEDIATE> if you begin a transaction by calling
+C<begin_work> or by turning off C<AutoCommit> (since 1.38_01).
 
-To avoid this, set a transaction type explicitly. You can issue a
-C<begin immediate transaction> (or C<begin exclusive transaction>)
-for each transaction, or set C<sqlite_use_immediate_transaction>
-database handle attribute to true (since 1.30_02) to always use
-an immediate transaction (even when you simply use C<begin_work>
-or turn off the C<AutoCommit>.).
+If you really need to turn off this feature for some reasons,
+set C<sqlite_use_immediate_transaction> database handle attribute
+to false, and the default C<deferred> transaction will be used.
 
   my $dbh = DBI->connect("dbi:SQLite::memory:", "", "", {
-    sqlite_use_immediate_transaction => 1,
+    sqlite_use_immediate_transaction => 0,
   });
 
-Note that this works only when all of the connections use the same
-(non-deferred) transaction. See L<http://sqlite.org/lockingv3.html>
-for locking details.
+Or, issue a C<BEGIN> statement explicitly each time you begin
+a transaction.
+
+See L<http://sqlite.org/lockingv3.html> for locking details.
 
 =head2 C<< $sth->finish >> and Transaction Rollback
 
@@ -1028,7 +1462,7 @@ are using linux. Also you might want to set:
 
   PRAGMA synchronous = OFF
 
-Which will prevent sqlite from doing fsync's when writing (which
+Which will prevent SQLite from doing fsync's when writing (which
 slows down non-transactional writes significantly) at the expense
 of some peace of mind. Also try playing with the cache_size pragma.
 
@@ -1090,6 +1524,10 @@ If you set this to true, DBD::SQLite tries to issue a C<begin
 immediate transaction> (instead of C<begin transaction>) when
 necessary. See above for details.
 
+As of version 1.38_01, this attribute is set to true by default.
+If you really need to use C<deferred> transactions for some reasons,
+set this to false explicitly.
+
 =item sqlite_see_if_its_a_number
 
 If you set this to true, DBD::SQLite tries to see if the bind values
@@ -1146,9 +1584,120 @@ B<TABLE_TYPE>: The type of object returned. Will be one of 'TABLE', 'VIEW',
 
 You can retrieve primary key names or more detailed information.
 As noted above, SQLite does not have the concept of catalogs, so the
-first argument of the mothods is usually C<undef>, and you'll usually
+first argument of the methods is usually C<undef>, and you'll usually
 set C<undef> for the second one (unless you want to know the primary
 keys of temporary tables).
+
+
+=head2 foreign_key_info
+
+  $sth = $dbh->foreign_key_info(undef, $pk_schema, $pk_table,
+                                undef, $fk_schema, $fk_table);
+
+Returns information about foreign key constraints, as specified in
+L<DBI/foreign_key_info>, but with some limitations : 
+
+=over
+
+=item *
+
+information in rows returned by the C<$sth> is incomplete with
+respect to the L<DBI/foreign_key_info> specification. All requested fields
+are present, but the content is C<undef> for some of them.
+
+=back
+
+The following nonempty fields are returned :
+
+B<PKTABLE_NAME>:
+The primary (unique) key table identifier.
+
+B<PKCOLUMN_NAME>:
+The primary (unique) key column identifier.
+
+B<FKTABLE_NAME>:
+The foreign key table identifier.
+
+B<FKCOLUMN_NAME>:
+The foreign key column identifier.
+
+B<KEY_SEQ>:
+The column sequence number (starting with 1), when
+several columns belong to a same constraint.
+
+B<UPDATE_RULE>:
+The referential action for the UPDATE rule.
+The following codes are defined:
+
+  CASCADE              0
+  RESTRICT             1
+  SET NULL             2
+  NO ACTION            3
+  SET DEFAULT          4
+
+Default is 3 ('NO ACTION').
+
+B<DELETE_RULE>:
+The referential action for the DELETE rule.
+The codes are the same as for UPDATE_RULE.
+
+Unfortunately, the B<DEFERRABILITY> field is always C<undef>;
+as a matter of fact, deferrability clauses are supported by SQLite,
+but they can't be reported because the C<PRAGMA foreign_key_list>
+tells nothing about them.
+
+B<UNIQUE_OR_PRIMARY>:
+Whether the column is primary or unique.
+
+B<Note>: foreign key support in SQLite must be explicitly turned on through
+a C<PRAGMA> command; see L</"Foreign keys"> earlier in this manual.
+
+=head2 statistics_info
+
+  $sth = $dbh->statistics_info(undef, $schema, $table,
+                                $unique_only, $quick);
+
+Returns information about a table and it's indexes, as specified in
+L<DBI/statistics_info>, but with some limitations : 
+
+=over
+
+=item *
+
+information in rows returned by the C<$sth> is incomplete with
+respect to the L<DBI/statistics_info> specification. All requested fields
+are present, but the content is C<undef> for some of them.
+
+=back
+
+The following nonempty fields are returned :
+
+B<TABLE_SCHEM>:
+The name of the schema (database) that the table is in. The default schema is 'main', temporary tables are in 'temp' and other databases will be in the name given when the database was attached.
+
+B<TABLE_NAME>:
+The name of the table
+
+B<NON_UNIQUE>:
+Contains 0 for unique indexes, 1 for non-unique indexes
+
+B<INDEX_NAME>:
+The name of the index
+
+B<TYPE>:
+SQLite uses 'btree' for all it's indexes
+
+B<ORDINAL_POSITION>:
+Column sequence number (starting with 1).
+
+B<COLUMN_NAME>:
+The name of the column
+
+=head2 ping
+
+  my $bool = $dbh->ping;
+
+returns true if the database file exists (or the database is in-memory), and the database connection is active.
 
 =head1 DRIVER PRIVATE METHODS
 
@@ -1170,7 +1719,7 @@ method (to avoid conflict with DBI's trace() method).
 
 This method returns the last inserted rowid. If you specify an INTEGER PRIMARY
 KEY as the first column in your table, that is the column that is returned.
-Otherwise, it is the hidden ROWID column. See the sqlite docs for details.
+Otherwise, it is the hidden ROWID column. See the SQLite docs for details.
 
 Generally you should not be using this method. Use the L<DBI> last_insert_id
 method instead. The usage of this is:
@@ -1180,6 +1729,10 @@ method instead. The usage of this is:
 Running C<$h-E<gt>last_insert_id("","","","")> is the equivalent of running
 C<$dbh-E<gt>sqlite_last_insert_rowid()> directly.
 
+=head2 $dbh->sqlite_db_filename()
+
+Retrieve the current (main) database filename. If the database is in-memory or temporary, this returns C<undef>.
+
 =head2 $dbh->sqlite_busy_timeout()
 
 Retrieve the current busy timeout.
@@ -1188,7 +1741,7 @@ Retrieve the current busy timeout.
 
 Set the current busy timeout. The timeout is in milliseconds.
 
-=head2 $dbh->sqlite_create_function( $name, $argc, $code_ref )
+=head2 $dbh->sqlite_create_function( $name, $argc, $code_ref, $flags )
 
 This method will register a new function which will be usable in an SQL
 query. The method's parameters are:
@@ -1209,6 +1762,10 @@ the function can take any number of arguments.
 
 This should be a reference to the function's implementation.
 
+=item $flags
+
+You can optionally pass an extra flag bit to create_function, which then would be ORed with SQLITE_UTF8 (default). As of 1.47_02 (SQLite 3.8.9), only meaning bit is SQLITE_DETERMINISTIC (introduced at SQLite 3.8.3), which can make the function perform better. See C API documentation at L<http://sqlite.org/c3ref/create_function.html> for details.
+
 =back
 
 For example, here is how to define a now() function which returns the
@@ -1216,7 +1773,7 @@ current number of seconds since the epoch:
 
   $dbh->sqlite_create_function( 'now', 0, sub { return time } );
 
-After this, it could be use from SQL as:
+After this, it could be used from SQL as:
 
   INSERT INTO mytable ( now() );
 
@@ -1277,7 +1834,7 @@ so for most common cases it will be simpler to just
 add your collation sequences in the C<%DBD::SQLite::COLLATION>
 hash (see section L</"COLLATION FUNCTIONS"> below).
 
-=head2 $dbh->sqlite_create_aggregate( $name, $argc, $pkg )
+=head2 $dbh->sqlite_create_aggregate( $name, $argc, $pkg, $flags )
 
 This method will register a new aggregate function which can then be used
 from SQL. The method's parameters are:
@@ -1298,6 +1855,10 @@ of arguments.
 =item $pkg
 
 This is the package which implements the aggregator interface.
+
+=item $flags
+
+You can optionally pass an extra flag bit to create_aggregate, which then would be ORed with SQLITE_UTF8 (default). As of 1.47_02 (SQLite 3.8.9), only meaning bit is SQLITE_DETERMINISTIC (introduced at SQLite 3.8.3), which can make the function perform better. See C API documentation at L<http://sqlite.org/c3ref/create_function.html> for details.
 
 =back
 
@@ -1354,7 +1915,7 @@ Here is a simple aggregate function which returns the variance
   
       my $sigma = 0;
       foreach my $v ( @$self ) {
-          $sigma += ($x - $mu)**2;
+          $sigma += ($v - $mu)**2;
       }
       $sigma = $sigma / ($n - 1);
   
@@ -1465,7 +2026,7 @@ action, C<DBD::SQLite::IGNORE> to disallow the specific action but
 allow the SQL statement to continue to be compiled, or
 C<DBD::SQLite::DENY> to cause the entire SQL statement to be rejected
 with an error. If the authorizer callback returns any other value,
-then then C<prepare> call that triggered the authorizer will fail with
+then C<prepare> call that triggered the authorizer will fail with
 an error message.
 
 An authorizer is used when preparing SQL statements from an untrusted
@@ -1523,11 +2084,15 @@ the currently connected database, and write it out to the named file.
 =head2 $dbh->sqlite_enable_load_extension( $bool )
 
 Calling this method with a true value enables loading (external)
-sqlite3 extensions. After the call, you can load extensions like this:
+SQLite3 extensions. After the call, you can load extensions like this:
 
   $dbh->sqlite_enable_load_extension(1);
   $sth = $dbh->prepare("select load_extension('libsqlitefunctions.so')")
   or die "Cannot prepare: " . $dbh->errstr();
+
+=head2 $dbh->sqlite_load_extension( $file, $proc )
+
+Loading an extension by a select statement (with the "load_extension" SQLite3 function like above) has some limitations. If you need to, say, create other functions from an extension, use this method. $file (a path to the extension) is mandatory, and $proc (an entry point name) is optional. You need to call C<sqlite_enable_load_extension> before calling C<sqlite_load_extension>.
 
 =head2 $dbh->sqlite_trace( $code_ref )
 
@@ -1582,11 +2147,45 @@ This method is considered experimental and is subject to change in future versio
 
 See also L<DBI::Profile> for better profiling options.
 
+=head2 $dbh->sqlite_table_column_metadata( $dbname, $tablename, $columnname )
+
+is for internal use only.
+
 =head2 DBD::SQLite::compile_options()
 
-Returns an array of compile options (available since sqlite 3.6.23,
+Returns an array of compile options (available since SQLite 3.6.23,
 bundled in DBD::SQLite 1.30_01), or an empty array if the bundled
 library is old or compiled with SQLITE_OMIT_COMPILEOPTION_DIAGS.
+
+=head2 DBD::SQLite::sqlite_status()
+
+Returns a hash reference that holds a set of status information of SQLite runtime such as memory usage or page cache usage (see L<http://www.sqlite.org/c3ref/c_status_malloc_count.html> for details). Each of the entry contains the current value and the highwater value.
+
+  my $status = DBD::SQLite::sqlite_status();
+  my $cur  = $status->{memory_used}{current};
+  my $high = $status->{memory_used}{highwater};
+
+You may also pass 0 as an argument to reset the status.
+
+=head2 $dbh->sqlite_db_status()
+
+Returns a hash reference that holds a set of status information of database connection such as cache usage. See L<http://www.sqlite.org/c3ref/c_dbstatus_options.html> for details. You may also pass 0 as an argument to reset the status.
+
+=head2 $sth->sqlite_st_status()
+
+Returns a hash reference that holds a set of status information of SQLite statement handle such as full table scan count. See L<http://www.sqlite.org/c3ref/c_stmtstatus_counter.html> for details. Statement status only holds the current value.
+
+  my $status = $sth->sqlite_st_status();
+  my $cur = $status->{fullscan_step};
+
+You may also pass 0 as an argument to reset the status.
+
+=head2 $sth->sqlite_create_module()
+
+Registers a name for a I<virtual table module>. Module names must be
+registered before creating a new virtual table using the module and
+before using a preexisting virtual table for the module.
+Virtual tables are explained in L<DBD::SQLite::VirtualTable>.
 
 =head1 DRIVER CONSTANTS
 
@@ -1786,230 +2385,14 @@ need to call the L</create_collation> method directly.
 
 =head1 FULLTEXT SEARCH
 
-The FTS3 extension module within SQLite allows users to create special
-tables with a built-in full-text index (hereafter "FTS3 tables"). The
-full-text index allows the user to efficiently query the database for
-all rows that contain one or more instances of a specified word (hereafter
-a "token"), even if the table contains many large documents.
+SQLite is bundled with an extension module for full-text
+indexing. Tables with this feature enabled can be efficiently queried
+to find rows that contain one or more instances of some specified
+words, in any column, even if the table contains many large documents.
 
+Explanations for using this feature are provided in a separate document:
+see L<DBD::SQLite::Fulltext_search>.
 
-=head2 Short introduction to FTS3
-
-The detailed documentation for FTS3 can be found
-at L<http://www.sqlite.org/fts3.html>. Here is a very short example :
-
-  $dbh->do(<<"") or die DBI::errstr;
-  CREATE VIRTUAL TABLE fts_example USING fts3(content)
-  
-  my $sth = $dbh->prepare("INSERT INTO fts_example(content) VALUES (?))");
-  $sth->execute($_) foreach @docs_to_insert;
-  
-  my $results = $dbh->selectall_arrayref(<<"");
-  SELECT docid, snippet(content) FROM fts_example WHERE content MATCH 'foo'
-  
-
-The key points in this example are :
-
-=over
-
-=item *
-
-The syntax for creating FTS3 tables is 
-
-  CREATE VIRTUAL TABLE <table_name> USING fts3(<columns>)
-
-where C<< <columns> >> is a list of column names. Columns may be
-typed, but the type information is ignored. If no columns
-are specified, the default is a single column named C<content>.
-In addition, FTS3 tables have an implicit column called C<docid>
-(or also C<rowid>) for numbering the stored documents.
-
-=item *
-
-Statements for inserting, updating or deleting records 
-use the same syntax as for regular SQLite tables.
-
-=item *
-
-Full-text searches are specified with the C<MATCH> operator, and an
-operand which may be a single word, a word prefix ending with '*', a
-list of words, a "phrase query" in double quotes, or a boolean combination
-of the above. 
-
-=item *
-
-The builtin function C<snippet(...)> builds a formatted excerpt of the
-document text, where the words pertaining to the query are highlighted.
-
-=back
-
-There are many more details to building and searching
-FTS3 tables, so we strongly invite you to read
-the full documentation at at L<http://www.sqlite.org/fts3.html>.
-
-B<Incompatible change> : 
-starting from version 1.31, C<DBD::SQLite> uses the new, recommended
-"Enhanced Query Syntax" for binary set operators (AND, OR, NOT, possibly 
-nested with parenthesis). Previous versions of C<DBD::SQLite> used the
-"Standard Query Syntax" (see L<http://www.sqlite.org/fts3.html#section_3_2>).
-Unfortunately this is a compilation switch, so it cannot be tuned
-at runtime; however, since FTS3 was never advertised in versions prior
-to 1.31, the change should be invisible to the vast majority of 
-C<DBD::SQLite> users. If, however, there are any applications
-that nevertheless were built using the "Standard Query" syntax,
-they have to be migrated, because the precedence of the C<OR> operator
-has changed. Conversion from old to new syntax can be 
-automated through L<DBD::SQLite::FTS3Transitional>, published
-in a separate distribution.
-
-=head2 Tokenizers
-
-The behaviour of full-text indexes strongly depends on how
-documents are split into I<tokens>; therefore FTS3 table
-declarations can explicitly specify how to perform
-tokenization: 
-
-  CREATE ... USING fts3(<columns>, tokenize=<tokenizer>)
-
-where C<< <tokenizer> >> is a sequence of space-separated
-words that triggers a specific tokenizer, as explained below.
-
-=head3 SQLite builtin tokenizers
-
-SQLite comes with three builtin tokenizers :
-
-=over
-
-=item simple
-
-Under the I<simple> tokenizer, a term is a contiguous sequence of
-eligible characters, where eligible characters are all alphanumeric
-characters, the "_" character, and all characters with UTF codepoints
-greater than or equal to 128. All other characters are discarded when
-splitting a document into terms. They serve only to separate adjacent
-terms.
-
-All uppercase characters within the ASCII range (UTF codepoints less
-than 128), are transformed to their lowercase equivalents as part of
-the tokenization process. Thus, full-text queries are case-insensitive
-when using the simple tokenizer.
-
-=item porter
-
-The I<porter> tokenizer uses the same rules to separate the input
-document into terms, but as well as folding all terms to lower case it
-uses the Porter Stemming algorithm to reduce related English language
-words to a common root.
-
-=item icu
-
-If SQLite is compiled with the SQLITE_ENABLE_ICU
-pre-processor symbol defined, then there exists a built-in tokenizer
-named "icu" implemented using the ICU library, and taking an
-ICU locale identifier as argument (such as "tr_TR" for
-Turkish as used in Turkey, or "en_AU" for English as used in
-Australia). For example:
-
-  CREATE VIRTUAL TABLE thai_text USING fts3(text, tokenize=icu th_TH)
-
-The ICU tokenizer implementation is very simple. It splits the input
-text according to the ICU rules for finding word boundaries and
-discards any tokens that consist entirely of white-space. This may be
-suitable for some applications in some locales, but not all. If more
-complex processing is required, for example to implement stemming or
-discard punctuation, use the perl tokenizer as explained below.
-
-=back
-
-=head3 Perl tokenizers
-
-In addition to the builtin SQLite tokenizers, C<DBD::SQLite>
-implements a I<perl> tokenizer, that can hook to any tokenizing
-algorithm written in Perl. This is specified as follows :
-
-  CREATE ... USING fts3(<columns>, tokenize=perl '<perl_function>')
-
-where C<< <perl_function> >> is a fully qualified Perl function name
-(i.e. prefixed by the name of the package in which that function is
-declared). So for example if the function is C<my_func> in the main 
-program, write
-
-  CREATE ... USING fts3(<columns>, tokenize=perl 'main::my_func')
-
-That function should return a code reference that takes a string as
-single argument, and returns an iterator (another function), which
-returns a tuple C<< ($term, $len, $start, $end, $index) >> for each
-term. Here is a simple example that tokenizes on words according to
-the current perl locale
-
-  sub locale_tokenizer {
-    return sub {
-      my $string = shift;
-
-      use locale;
-      my $regex      = qr/\w+/;
-      my $term_index = 0;
-
-      return sub { # closure
-        $string =~ /$regex/g or return; # either match, or no more token
-        my ($start, $end) = ($-[0], $+[0]);
-        my $len           = $end-$start;
-        my $term          = substr($string, $start, $len);
-        return ($term, $len, $start, $end, $term_index++);
-      }
-    };
-  }
-
-There must be three levels of subs, in a kind of "Russian dolls" structure,
-because :
-
-=over
-
-=item *
-
-the external, named sub is called whenever accessing a FTS3 table
-with that tokenizer
-
-=item *
-
-the inner, anonymous sub is called whenever a new string
-needs to be tokenized (either for inserting new text into the table,
-or for analyzing a query).
-
-=item *
-
-the innermost, anonymous sub is called repeatedly for retrieving
-all terms within that string.
-
-=back
-
-Instead of writing tokenizers by hand, you can grab one of those
-already implemented in the L<Search::Tokenizer> module :
-
-  use Search::Tokenizer;
-  $dbh->do(<<"") or die DBI::errstr;
-  CREATE ... USING fts3(<columns>, 
-                        tokenize=perl 'Search::Tokenizer::unaccent')
-
-or you can use L<Search::Tokenizer/new> to build
-your own tokenizer.
-
-
-=head2 Incomplete handling of utf8 characters
-
-The current FTS3 implementation in SQLite is far from complete with
-respect to utf8 handling : in particular, variable-length characters
-are not treated correctly by the builtin functions
-C<offsets()> and C<snippet()>.
-
-=head2 Database space for FTS3
-
-FTS3 stores a complete copy of the indexed documents, together with
-the fulltext index. On a large collection of documents, this can
-consume quite a lot of disk space. If copies of documents are also
-available as external resources (for example files on the filesystem),
-that space can sometimes be spared --- see the tip in the 
-L<Cookbook|DBD::SQLite::Cookbook/"Sparing database disk space">.
 
 =head1 R* TREE SUPPORT
 
@@ -2050,9 +2433,41 @@ For more detail, please see the SQLite R-Tree page
 queries using callbacks, as mentioned in the prior link, have not been
 implemented yet.
 
+=head1 VIRTUAL TABLES IMPLEMENTED IN PERL
+
+SQLite has a concept of "virtual tables" which look like regular
+tables but are implemented internally through specific functions.
+The fulltext or R* tree features described in the previous chapters
+are examples of such virtual tables, implemented in C code.
+
+C<DBD::SQLite> also supports virtual tables implemented in I<Perl code>:
+see L<DBD::SQLite::VirtualTable> for using or implementing such
+virtual tables. These can have many interesting uses
+for joining regular DBMS data with some other kind of data within your
+Perl programs. Bundled with the present distribution are :
+
+=over 
+
+=item *
+
+L<DBD::SQLite::VirtualTable::FileContent> : implements a virtual
+column that exposes file contents. This is especially useful
+in conjunction with a fulltext index; see L<DBD::SQLite::Fulltext_search>.
+
+=item *
+
+L<DBD::SQLite::VirtualTable::PerlData> : binds to a Perl array
+within the Perl program. This can be used for simple import/export
+operations, for debugging purposes, for joining data from different
+sources, etc.
+
+=back
+
+Other Perl virtual tables may also be published separately on CPAN.
+
 =head1 FOR DBD::SQLITE EXTENSION AUTHORS
 
-Since 1.30_01, you can retrieve the bundled sqlite C source and/or
+Since 1.30_01, you can retrieve the bundled SQLite C source and/or
 header like this:
 
   use File::ShareDir 'dist_dir';
@@ -2095,10 +2510,6 @@ code we work with leaks.
 
 Reading/writing into blobs using C<sqlite2_blob_open> / C<sqlite2_blob_close>.
 
-=head2 Flags for sqlite3_open_v2
-
-Support the full API of sqlite3_open_v2 (flags for opening the file).
-
 =head2 Support for custom callbacks for R-Tree queries
 
 Custom queries of a R-Tree index using a callback are possible with
@@ -2112,9 +2523,17 @@ Bugs should be reported via the CPAN bug tracker at
 
 L<http://rt.cpan.org/NoAuth/ReportBug.html?Queue=DBD-SQLite>
 
-Note that bugs of bundled sqlite library (i.e. bugs in C<sqlite3.[ch]>)
-should be reported to the sqlite developers at sqlite.org via their bug
+Note that bugs of bundled SQLite library (i.e. bugs in C<sqlite3.[ch]>)
+should be reported to the SQLite developers at sqlite.org via their bug
 tracker or via their mailing list.
+
+The master repository is on GitHub:
+
+L<https://github.com/DBD-SQLite/DBD-SQLite>.
+
+We also have a mailing list:
+
+L<http://lists.scsys.co.uk/cgi-bin/mailman/listinfo/dbd-sqlite>
 
 =head1 AUTHORS
 
@@ -2142,9 +2561,9 @@ Some parts copyright 2008 Francis J. Lacoste.
 
 Some parts copyright 2008 Wolfgang Sourdeau.
 
-Some parts copyright 2008 - 2012 Adam Kennedy.
+Some parts copyright 2008 - 2013 Adam Kennedy.
 
-Some parts copyright 2009 - 2012 Kenichi Ishigaki.
+Some parts copyright 2009 - 2013 Kenichi Ishigaki.
 
 Some parts derived from L<DBD::SQLite::Amalgamation>
 copyright 2008 Audrey Tang.

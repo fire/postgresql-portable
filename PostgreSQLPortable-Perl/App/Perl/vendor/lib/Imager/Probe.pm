@@ -4,6 +4,8 @@ use File::Spec;
 use Config;
 use Cwd ();
 
+our $VERSION = "1.004";
+
 my @alt_transfer = qw/altname incsuffix libbase/;
 
 sub probe {
@@ -383,6 +385,14 @@ sub _resolve_libs {
 sub _lib_paths {
   my ($req) = @_;
 
+  print "$req->{name} IM_LIBPATH: $ENV{IM_LIBPATH}\n"
+    if $req->{verbose} && defined $ENV{IM_LIBPATH};
+  print "$req->{name} LIB: $ENV{IM_LIBPATH}\n"
+    if $req->{verbose} && defined $ENV{LIB} && $^O eq "MSWin32";
+  my $lp = $req->{libpath};
+  print "$req->{name} libpath: ", ref $lp ? join($Config{path_sep}, @$lp) : $lp, "\n"
+    if $req->{verbose} && defined $lp;
+
   return _paths
     (
      $ENV{IM_LIBPATH},
@@ -397,6 +407,7 @@ sub _lib_paths {
      "/usr/lib",
      "/usr/local/lib",
      _gcc_lib_paths(),
+     _dyn_lib_paths(),
     );
 }
 
@@ -410,6 +421,8 @@ sub _gcc_lib_paths {
   $base_version >= 4
     or return;
 
+  local $ENV{LANG} = "C";
+  local $ENV{LC_ALL} = "C";
   my ($lib_line) = grep /^libraries:/, `$Config{cc} -print-search-dirs`
     or return;
   $lib_line =~ s/^libraries: =//;
@@ -418,8 +431,22 @@ sub _gcc_lib_paths {
   return grep !/gcc/ && -d, split /:/, $lib_line;
 }
 
+sub _dyn_lib_paths {
+  return map { defined() ? split /\Q$Config{path_sep}/ : () }
+    map $ENV{$_},
+      qw(LD_RUN_PATH LD_LIBRARY_PATH DYLD_LIBRARY_PATH LIBRARY_PATH);
+}
+
 sub _inc_paths {
   my ($req) = @_;
+
+  print "$req->{name} IM_INCPATH: $ENV{IM_INCPATH}\n"
+    if $req->{verbose} && defined $ENV{IM_INCPATH};
+  print "$req->{name} INCLUDE: $ENV{INCLUDE}\n"
+    if $req->{verbose} && defined $ENV{INCLUDE} && $^O eq "MSWin32";
+  my $ip = $req->{incpath};
+  print "$req->{name} incpath: ", ref $ip ? join($Config{path_sep}, @$ip) : $ip, "\n"
+    if $req->{verbose} && defined $req->{incpath};
 
   my @paths = _paths
     (
@@ -434,6 +461,7 @@ sub _inc_paths {
      ),
      "/usr/include",
      "/usr/local/include",
+     _dyn_inc_paths(),
     );
 
   if ($req->{incsuffix}) {
@@ -441,6 +469,13 @@ sub _inc_paths {
   }
 
   return @paths;
+}
+
+sub _dyn_inc_paths {
+  return map {
+    my $tmp = $_;
+    $tmp =~ s/\blib$/include/ ? $tmp : ()
+  } _dyn_lib_paths();
 }
 
 sub _paths {
@@ -618,5 +653,9 @@ C<altname> key describing the alternative.  Any key not mentioned in
 an alternative defaults to the value from the main configuration.
 
 =back
+
+=head1 AUTHOR
+
+Tony Cook <tonyc@cpan.org>, Arnar M. Hrafnkelsson
 
 =cut

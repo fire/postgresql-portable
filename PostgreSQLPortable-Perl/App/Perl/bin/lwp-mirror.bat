@@ -1,31 +1,17 @@
 @rem = '--*-Perl-*--
 @echo off
 if "%OS%" == "Windows_NT" goto WinNT
-IF EXIST "%~dp0perl.exe" (
-"%~dp0perl.exe" -x -S "%0" %1 %2 %3 %4 %5 %6 %7 %8 %9
-) ELSE IF EXIST "%~dp0..\..\bin\perl.exe" (
-"%~dp0..\..\bin\perl.exe" -x -S "%0" %1 %2 %3 %4 %5 %6 %7 %8 %9
-) ELSE (
 perl -x -S "%0" %1 %2 %3 %4 %5 %6 %7 %8 %9
-)
-
 goto endofperl
 :WinNT
-IF EXIST "%~dp0perl.exe" (
-"%~dp0perl.exe" -x -S %0 %*
-) ELSE IF EXIST "%~dp0..\..\bin\perl.exe" (
-"%~dp0..\..\bin\perl.exe" -x -S %0 %*
-) ELSE (
 perl -x -S %0 %*
-)
-
 if NOT "%COMSPEC%" == "%SystemRoot%\system32\cmd.exe" goto endofperl
 if %errorlevel% == 9009 echo You do not have Perl in your PATH.
 if errorlevel 1 goto script_failed_so_exit_with_non_zero_val 2>nul
 goto endofperl
 @rem ';
 #!/usr/bin/perl -w
-#line 29
+#line 15
 
 # Simple mirror utility using LWP
 
@@ -40,7 +26,7 @@ lwp-mirror - Simple mirror utility
 =head1 DESCRIPTION
 
 This program can be used to mirror a document from a WWW server.  The
-document is only transfered if the remote copy is newer than the local
+document is only transferred if the remote copy is newer than the local
 copy.  If the local copy is newer nothing happens.
 
 Use the C<-v> option to print the version number of this program.
@@ -74,7 +60,7 @@ $progname = $0;
 $progname =~ s,.*/,,;  # use basename only
 $progname =~ s/\.\w*$//; #strip extension if any
 
-$VERSION = "6.00";
+$VERSION = "6.15";
 
 $opt_h = undef;  # print usage
 $opt_v = undef;  # print version

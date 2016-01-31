@@ -1,7 +1,7 @@
 #---------------------------------------------------------------------
 package IO::HTML;
 #
-# Copyright 2012 Christopher J. Madsen
+# Copyright 2014 Christopher J. Madsen
 #
 # Author: Christopher J. Madsen <perl@cjmweb.net>
 # Created: 14 Jan 2012
@@ -25,8 +25,8 @@ use Carp 'croak';
 use Encode 2.10 qw(decode find_encoding); # need utf-8-strict encoding
 use Exporter 5.57 'import';
 
-our $VERSION = '1.00';
-# This file is part of IO-HTML 1.00 (February 23, 2013)
+our $VERSION = '1.001';
+# This file is part of IO-HTML 1.001 (June 28, 2014)
 
 our $default_encoding ||= 'cp1252';
 
@@ -155,7 +155,7 @@ sub sniff_encoding
 } # end sniff_encoding
 
 #=====================================================================
-# Based on HTML5 8.2.2.1 Determining the character encoding:
+# Based on HTML5 8.2.2.2 Determining the character encoding:
 
 # Get attribute from current position of $_
 sub _get_attribute
@@ -264,8 +264,8 @@ IO::HTML - Open an HTML file with automatic charset detection
 
 =head1 VERSION
 
-This document describes version 1.00 of
-IO::HTML, released February 23, 2013.
+This document describes version 1.001 of
+IO::HTML, released June 28, 2014.
 
 =head1 SYNOPSIS
 
@@ -284,7 +284,7 @@ IO::HTML, released February 23, 2013.
 
 IO::HTML provides an easy way to open a file containing HTML while
 automatically determining its encoding.  It uses the HTML5 encoding
-sniffing algorithm specified in section 8.2.2.1 of the draft standard.
+sniffing algorithm specified in section 8.2.2.2 of the draft standard.
 
 The algorithm as implemented here is:
 
@@ -479,8 +479,8 @@ C<html_file>, C<html_file_and_encoding>, C<html_outfile>.
 
 =head1 SEE ALSO
 
-The HTML5 specification, section 8.2.2.1 Determining the character encoding:
-L<http://www.w3.org/TR/html5/parsing.html#determining-the-character-encoding>
+The HTML5 specification, section 8.2.2.2 Determining the character encoding:
+L<http://www.w3.org/TR/html5/syntax.html#determining-the-character-encoding>
 
 =head1 DIAGNOSTICS
 
@@ -540,11 +540,11 @@ or through the web interface at
 L<< http://rt.cpan.org/Public/Bug/Report.html?Queue=IO-HTML >>.
 
 You can follow or contribute to IO-HTML's development at
-L<< http://github.com/madsen/io-html >>.
+L<< https://github.com/madsen/io-html >>.
 
 =head1 COPYRIGHT AND LICENSE
 
-This software is copyright (c) 2013 by Christopher J. Madsen.
+This software is copyright (c) 2014 by Christopher J. Madsen.
 
 This is free software; you can redistribute it and/or modify it under
 the same terms as the Perl 5 programming language system itself.

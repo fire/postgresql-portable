@@ -21,7 +21,6 @@ sub config_names  { keys %$config }
 
 sub write {
   my $me = __FILE__;
-  require IO::File;
 
   # Can't use Module::Build::Dumper here because M::B is only a
   # build-time prereq of this module
@@ -29,7 +28,7 @@ sub write {
 
   my $mode_orig = (stat $me)[2] & 07777;
   chmod($mode_orig | 0222, $me); # Make it writeable
-  my $fh = IO::File->new($me, 'r+') or die "Can't rewrite $me: $!";
+  open(my $fh, '+<', $me) or die "Can't rewrite $me: $!";
   seek($fh, 0, 0);
   while (<$fh>) {
     last if /^__DATA__$/;
@@ -38,11 +37,11 @@ sub write {
 
   seek($fh, tell($fh), 0);
   my $data = [$config, $features, $auto_features];
-  $fh->print( 'do{ my '
+  print($fh 'do{ my '
 	      . Data::Dumper->new([$data],['x'])->Purity(1)->Dump()
 	      . '$x; }' );
   truncate($fh, tell($fh));
-  $fh->close;
+  close $fh;
 
   chmod($mode_orig, $me)
     or warn "Couldn't restore permissions on $me: $!";
@@ -166,12 +165,12 @@ authorship claim or copyright claim to the contents of C<Alien::Tidyp::ConfigDat
 __DATA__
 do{ my $x = [
        {
-         'share_subdir' => 'v1.4.7',
          'config' => {
                        'INC' => '-I"@PrEfIx@/include/tidyp"',
                        'LIBS' => '-L"@PrEfIx@/lib" -ltidyp',
                        'PREFIX' => '@PrEfIx@'
-                     }
+                     },
+         'share_subdir' => 'v1.4.7'
        },
        {},
        {}

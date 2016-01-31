@@ -1,17 +1,30 @@
-# $Id: DBI.pm 35 2011-06-17 01:34:42Z stro $
+# $Id: DBI.pm 53 2015-07-14 23:14:34Z stro $
 
 package CPAN::SQLite::DBI;
 use strict;
 use warnings;
+
+our $VERSION = '0.211';
+
+use English qw/-no_match_vars/;
+
 require File::Spec;
 use DBI;
-our $VERSION = '0.202';
 
-use base qw(Exporter);
+use parent 'Exporter';
 our ($dbh, $tables, @EXPORT_OK);
 @EXPORT_OK = qw($dbh $tables);
 
 $tables = {
+    'info' => {
+        'primary' => {
+            'status' => q!INTEGER NOT NULL PRIMARY KEY!,
+        },
+        'other'   => {},
+        'key'     => [],
+        'name'    => 'status',
+        'id'      => 'status',
+    },
            mods => {
                     primary => {mod_id => q{INTEGER NOT NULL PRIMARY KEY}},
                     other => {
@@ -76,7 +89,10 @@ sub new {
   my $db_dir = $args{db_dir} || $args{CPAN};
   my $db = File::Spec->catfile($db_dir, $args{db_name});
   $dbh ||= DBI->connect("DBI:SQLite:$db", '', '',
-                        {RaiseError => 1, AutoCommit => 0});
+    {
+      RaiseError => 1, AutoCommit => 0,
+      sqlite_use_immediate_transaction => 0,
+    });
   die "Cannot connect to $db" unless $dbh;
   $dbh->{AutoCommit} = 0;
 
@@ -128,11 +144,13 @@ sub db_error {
 
 1;
 
-__END__
-
 =head1 NAME
 
 CPAN::SQLite::DBI - DBI information for the CPAN::SQLite database
+
+=head1 VERSION
+
+version 0.211
 
 =head1 DESCRIPTION
 

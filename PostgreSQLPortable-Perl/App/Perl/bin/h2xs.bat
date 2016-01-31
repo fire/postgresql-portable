@@ -1,31 +1,17 @@
 @rem = '--*-Perl-*--
 @echo off
 if "%OS%" == "Windows_NT" goto WinNT
-IF EXIST "%~dp0perl.exe" (
-"%~dp0perl.exe" -x -S "%0" %1 %2 %3 %4 %5 %6 %7 %8 %9
-) ELSE IF EXIST "%~dp0..\..\bin\perl.exe" (
-"%~dp0..\..\bin\perl.exe" -x -S "%0" %1 %2 %3 %4 %5 %6 %7 %8 %9
-) ELSE (
 perl -x -S "%0" %1 %2 %3 %4 %5 %6 %7 %8 %9
-)
-
 goto endofperl
 :WinNT
-IF EXIST "%~dp0perl.exe" (
-"%~dp0perl.exe" -x -S %0 %*
-) ELSE IF EXIST "%~dp0..\..\bin\perl.exe" (
-"%~dp0..\..\bin\perl.exe" -x -S %0 %*
-) ELSE (
 perl -x -S %0 %*
-)
-
 if NOT "%COMSPEC%" == "%SystemRoot%\system32\cmd.exe" goto endofperl
 if %errorlevel% == 9009 echo You do not have Perl in your PATH.
 if errorlevel 1 goto script_failed_so_exit_with_non_zero_val 2>nul
 goto endofperl
 @rem ';
 #!perl
-#line 29
+#line 15
     eval 'exec C:\strawberry\perl\bin\perl.exe -S $0 ${1+"$@"}'
 	if $running_under_some_shell;
 
@@ -856,6 +842,10 @@ if( @path_h ){
 	    $rest =~ s!/\*.*?(\*/|\n)|//.*!!g; # Remove comments
 	    $rest =~ s/^\s+//;
 	    $rest =~ s/\s+$//;
+	    if ($rest eq '') {
+	      print("Skip empty $def\n") if $opt_d;
+	      next defines;
+	    }
 	    # Cannot do: (-1) and ((LHANDLE)3) are OK:
 	    #print("Skip non-wordy $def => $rest\n"),
 	    #  next defines if $rest =~ /[^\w\$]/;
@@ -981,8 +971,8 @@ if( ! $opt_X ){  # use XS, unless it was disabled
       }
       warn "Scanning $filename for functions...\n";
       my @styles = $Config{gccversion} ? qw(C++ C9X GNU) : qw(C++ C9X);
-      $c = new C::Scan 'filename' => $filename, 'filename_filter' => $filter,
-	'add_cppflags' => $addflags, 'c_styles' => \@styles;
+      $c = C::Scan->new('filename' => $filename, 'filename_filter' => $filter,
+        'add_cppflags' => $addflags, 'c_styles' => \@styles);
       $c->set('includeDirs' => ["$Config::Config{archlib}/CORE", $cwd]);
 
       $c->get('keywords')->{'__restrict'} = 1;
@@ -1376,6 +1366,7 @@ if( ! $opt_X ){ # print XS, unless it is disabled
 warn "Writing $ext$modpname/$modfname.xs\n";
 
 print XS <<"END";
+#define PERL_NO_GET_CONTEXT
 #include "EXTERN.h"
 #include "perl.h"
 #include "XSUB.h"
@@ -1906,7 +1897,7 @@ elsif ( $compat_version < 5.006002 )
   $prereq_pm .= q%'Test'        =>  0, %;
 }
 
-if ( $compat_version < 5.006 and !$opt_X and $use_xsloader)
+if (!$opt_X and $use_xsloader)
 {
   $prereq_pm .= q%'XSLoader'    =>  0, %;
 }
@@ -1918,11 +1909,13 @@ use ExtUtils::MakeMaker;
 # the contents of the Makefile that is written.
 WriteMakefile(
     NAME              => '$module',
-    VERSION_FROM      => '$modpmname', # finds \$VERSION
+    VERSION_FROM      => '$modpmname', # finds \$VERSION, requires EU::MM from perl >= 5.5
     PREREQ_PM         => {$prereq_pm}, # e.g., Module::Name => 1.1
-    (\$] >= 5.005 ?     ## Add these new keywords supported since 5.005
-      (ABSTRACT_FROM  => '$modpmname', # retrieve abstract from module
-       AUTHOR         => '$author <$email>') : ()),
+    ABSTRACT_FROM     => '$modpmname', # retrieve abstract from module
+    AUTHOR            => '$author <$email>',
+    #LICENSE           => 'perl',
+    #Value must be from legacy list of licenses here
+    #http://search.cpan.org/perldoc?Module%3A%3ABuild%3A%3AAPI
 END
 if (!$opt_X) { # print C stuff, unless XS is disabled
   $opt_F = '' unless defined $opt_F;

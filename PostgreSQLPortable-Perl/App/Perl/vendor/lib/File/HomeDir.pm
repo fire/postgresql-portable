@@ -320,11 +320,6 @@ CLASS: {
 
 # Do the actual tie of the global %~ variable
 tie %~, 'File::HomeDir::TIE';
-eval {
-	require Portable;
-	Portable->import('HomeDir');
-};
-
 
 1;
 

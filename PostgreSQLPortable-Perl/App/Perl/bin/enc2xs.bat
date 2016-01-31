@@ -1,31 +1,17 @@
 @rem = '--*-Perl-*--
 @echo off
 if "%OS%" == "Windows_NT" goto WinNT
-IF EXIST "%~dp0perl.exe" (
-"%~dp0perl.exe" -x -S "%0" %1 %2 %3 %4 %5 %6 %7 %8 %9
-) ELSE IF EXIST "%~dp0..\..\bin\perl.exe" (
-"%~dp0..\..\bin\perl.exe" -x -S "%0" %1 %2 %3 %4 %5 %6 %7 %8 %9
-) ELSE (
 perl -x -S "%0" %1 %2 %3 %4 %5 %6 %7 %8 %9
-)
-
 goto endofperl
 :WinNT
-IF EXIST "%~dp0perl.exe" (
-"%~dp0perl.exe" -x -S %0 %*
-) ELSE IF EXIST "%~dp0..\..\bin\perl.exe" (
-"%~dp0..\..\bin\perl.exe" -x -S %0 %*
-) ELSE (
 perl -x -S %0 %*
-)
-
 if NOT "%COMSPEC%" == "%SystemRoot%\system32\cmd.exe" goto endofperl
 if %errorlevel% == 9009 echo You do not have Perl in your PATH.
 if errorlevel 1 goto script_failed_so_exit_with_non_zero_val 2>nul
 goto endofperl
 @rem ';
 #!./perl
-#line 29
+#line 15
 BEGIN {
     # @INC poking  no longer needed w/ new MakeMaker and Makefile.PL's
     # with $ENV{PERL_CORE} set
@@ -37,11 +23,11 @@ use warnings;
 use Getopt::Std;
 use Config;
 my @orig_ARGV = @ARGV;
-our $VERSION  = do { my @r = (q$Revision: 2.7 $ =~ /\d+/g); sprintf "%d."."%02d" x $#r, @r };
+our $VERSION  = do { my @r = (q$Revision: 2.18 $ =~ /\d+/g); sprintf "%d."."%02d" x $#r, @r };
 
 # These may get re-ordered.
 # RAW is a do_now as inserted by &enter
-# AGG is an aggreagated do_now, as built up by &process
+# AGG is an aggregated do_now, as built up by &process
 
 use constant {
   RAW_NEXT => 0,
@@ -77,7 +63,7 @@ use constant {
 # only the leaf "do_now"s cause output bytes, and they in turn point back to
 # the start state.
 
-# For an encoding where there are varaible length input byte sequences, you
+# For an encoding where there are variable length input byte sequences, you
 # will encounter a leaf "do_now" sooner for the shorter input sequences, but
 # as before the leaves will point back to the start state.
 
@@ -95,7 +81,7 @@ use constant {
 # single byte encoding, with  "ABCD" going "abcd". There will be
 # 4 "do_now"s, {"A" => [...,"a",...], "B" => [...,"b",...], "C"=>..., "D"=>...}
 
-# &process then walks the tree, building aggregate "do_now" structres for
+# &process then walks the tree, building aggregate "do_now" structures for
 # adjacent bytes where possible. The aggregate is for a contiguous range of
 # bytes which each produce the same length of output, each move to the
 # same next state, and each have the same fallback flag.
@@ -160,10 +146,64 @@ my %opt;
 # -o <output> to specify the output file name (else it's the first arg)
 # -f <inlist> to give a file with a list of input files (else use the args)
 # -n <name> to name the encoding (else use the basename of the input file.
-getopts('CM:SQqOo:f:n:',\%opt);
+getopts('CM:SQqOo:f:n:v',\%opt);
 
 $opt{M} and make_makefile_pl($opt{M}, @ARGV);
 $opt{C} and make_configlocal_pm($opt{C}, @ARGV);
+$opt{v} ||= $ENV{ENC2XS_VERBOSE};
+
+sub verbose {
+    print STDERR @_ if $opt{v};
+}
+sub verbosef {
+    printf STDERR @_ if $opt{v};
+}
+
+
+# ($cpp, $static, $sized) = compiler_info($declaration)
+#
+# return some information about the compiler and compile options we're using:
+#
+#   $declaration - true if we're doing a declaration rather than a definition.
+#
+#   $cpp    - we're using C++
+#   $static - ok to declare the arrays as static
+#   $sized  - the array declarations should be sized
+
+sub compiler_info {
+    my ($declaration) = @_;
+
+    my $ccflags = $Config{ccflags};
+    if (defined $Config{ccwarnflags}) {
+        $ccflags .= " " . $Config{ccwarnflags};
+    }
+    my $compat   = $ccflags =~ /\Q-Wc++-compat/;
+    my $pedantic = $ccflags =~ /-pedantic/;
+
+    my $cpp      = ($Config{d_cplusplus} || '') eq 'define';
+
+    # The encpage_t tables contain recursive and mutually recursive
+    # references. To allow them to compile under C++ and some restrictive
+    # cc options, it may be necessary to make the tables non-static/const
+    # (thus moving them from the text to the data segment) and/or not
+    # include the size in the declaration.
+
+    my $static = !(
+                        $cpp
+                     || ($compat && $pedantic)
+                     || ($^O eq 'MacOS' && $declaration)
+                  );
+
+    # -Wc++-compat on its own warns if the array declaration is sized.
+    # The easiest way to avoid this warning is simply not to include
+    # the size in the declaration.
+    # With -pedantic as well, the issue doesn't arise because $static
+    # above becomes false.
+    my $sized  = $declaration && !($compat && !$pedantic);
+
+    return ($cpp, $static, $sized);
+}
+
 
 # This really should go first, else the die here causes empty (non-erroneous)
 # output files to be written.
@@ -211,10 +251,10 @@ END
 
   if ($cname =~ /(\w+)\.xs$/)
    {
+    print C "#define PERL_NO_GET_CONTEXT\n";
     print C "#include <EXTERN.h>\n";
     print C "#include <perl.h>\n";
     print C "#include <XSUB.h>\n";
-    print C "#define U8 U8\n";
    }
   print C "#include \"encode.h\"\n\n";
 
@@ -279,7 +319,7 @@ foreach my $enc (sort cmp_name @encfiles)
 
 if ($doC)
  {
-  print STDERR "Writing compiled form\n";
+  verbose "Writing compiled form\n";
   foreach my $name (sort cmp_name keys %encoding)
    {
     my ($e2u,$u2e,$erep,$min_el,$max_el) = @{$encoding{$name}};
@@ -298,9 +338,10 @@ if ($doC)
 
     # push(@{$encoding{$name}},outstring(\*C,$e2u->{Cname}.'_def',$erep));
    }
-  my $cpp = ($Config{d_cplusplus} || '') eq 'define';
-  my $exta = $cpp ? 'extern "C" ' : "static";
-  my $extb = $cpp ? 'extern "C" ' : "";
+  my ($cpp) = compiler_info(0);
+  my $ext  = $cpp ? 'extern "C"' : "extern";
+  my $exta = $cpp ? 'extern "C"' : "static";
+  my $extb = $cpp ? 'extern "C"' : "";
   foreach my $enc (sort cmp_name keys %encoding)
    {
     # my ($e2u,$u2e,$rep,$min_el,$max_el,$rsym) = @{$encoding{$enc}};
@@ -327,7 +368,7 @@ if ($doC)
    {
     my $sym = "${enc}_encoding";
     $sym =~ s/\W+/_/g;
-    print H "extern encode_t $sym;\n";
+    print H "${ext} encode_t $sym;\n";
     print D " Encode_XSEncoding(aTHX_ &$sym);\n";
    }
 
@@ -341,8 +382,14 @@ Encode_XSEncoding(pTHX_ encode_t *enc)
 {
  dSP;
  HV *stash = gv_stashpv("Encode::XS", TRUE);
- SV *sv    = sv_bless(newRV_noinc(newSViv(PTR2IV(enc))),stash);
+ SV *iv    = newSViv(PTR2IV(enc));
+ SV *sv    = sv_bless(newRV_noinc(iv),stash);
  int i = 0;
+ /* with the SvLEN() == 0 hack, PVX won't be freed. We cast away name's
+ constness, in the hope that perl won't mess with it. */
+ assert(SvTYPE(iv) >= SVt_PV); assert(SvLEN(iv) == 0);
+ SvFLAGS(iv) |= SVp_POK;
+ SvPVX(iv) = (char*) enc->name[0];
  PUSHMARK(sp);
  XPUSHs(sv);
  while (enc->name[i])
@@ -368,10 +415,10 @@ END
 
   my $perc_saved    = $saved/($strings + $saved) * 100;
   my $perc_subsaved = $subsave/($strings + $subsave) * 100;
-  printf STDERR "%d bytes in string tables\n",$strings;
-  printf STDERR "%d bytes (%.3g%%) saved spotting duplicates\n",
+  verbosef "%d bytes in string tables\n",$strings;
+  verbosef "%d bytes (%.3g%%) saved spotting duplicates\n",
     $saved, $perc_saved              if $saved;
-  printf STDERR "%d bytes (%.3g%%) saved using substrings\n",
+  verbosef "%d bytes (%.3g%%) saved using substrings\n",
     $subsave, $perc_subsaved         if $subsave;
  }
 elsif ($doEnc)
@@ -593,7 +640,7 @@ sub enter {
   # as current state.
   $next ||= $current;
   # Making sure it is defined seems to be faster than {no warnings;} in
-  # &process, or passing it in as 0 explicity.
+  # &process, or passing it in as 0 explicitly.
   # XXX $fallback ||= 0;
 
   # Start at the beginning and work forwards through the string to zero.
@@ -622,12 +669,12 @@ sub enter {
       $do_now->[RAW_NEXT] = $next;
       return;
     }
-    # Tail recursion. The intermdiate state may not have a name yet.
+    # Tail recursion. The intermediate state may not have a name yet.
     $current = $do_now->[RAW_NEXT];
   }
 }
 
-# This is purely for optimistation. It's just &enter hard coded for $fallback
+# This is purely for optimisation. It's just &enter hard coded for $fallback
 # of 0, using only a 3 entry array ref to save memory for every entry.
 sub enter_fb0 {
   my ($current,$inbytes,$outbytes,$next) = @_;
@@ -719,10 +766,10 @@ sub addstrings
   }
  if ($a->{'Forward'})
   {
-   my $cpp = ($Config{d_cplusplus} || '') eq 'define';
-   my $var = $^O eq 'MacOS' || $cpp ? 'extern' : 'static';
-   my $const = $cpp ? '' : 'const';
-   print $fh "$var $const encpage_t $name\[",scalar(@{$a->{'Entries'}}),"];\n";
+   my ($cpp, $static, $sized) = compiler_info(1);
+   my $var   = $static ? 'static const' : 'extern';
+   my $count = $sized ? scalar(@{$a->{'Entries'}}) : '';
+   print $fh "$var encpage_t $name\[$count];\n";
   }
  $a->{'DoneStrings'} = 1;
  foreach my $b (@{$a->{'Entries'}})
@@ -740,7 +787,7 @@ sub outbigstring
 
   # Make the big string in the string accumulator. Longest first, on the hope
   # that this makes it more likely that we find the short strings later on.
-  # Not sure if it helps sorting strings of the same length lexcically.
+  # Not sure if it helps sorting strings of the same length lexically.
   foreach my $s (sort {length $b <=> length $a || $a cmp $b} keys %strings) {
     my $index = index $string_acc, $s;
     if ($index >= 0) {
@@ -785,7 +832,7 @@ sub outbigstring
   }
 
   $strings = length $string_acc;
-  my $cpp = ($Config{d_cplusplus} || '') eq 'define';
+  my ($cpp) = compiler_info(0);
   my $var = $cpp ? '' : 'static';
   my $definition = "\n$var const U8 $name\[$strings] = { " .
     join(',',unpack "C*",$string_acc);
@@ -812,10 +859,9 @@ sub outtable
    my ($s,$e,$out,$t,$end,$l) = @$b;
    outtable($fh,$t,$bigname) unless $t->{'Done'};
   }
- my $cpp = ($Config{d_cplusplus} || '') eq 'define';
- my $var = $cpp ? '' : 'static';
- my $const = $cpp ? '' : 'const';
- print $fh "\n$var $const encpage_t $name\[",
+ my ($cpp, $static) = compiler_info(0);
+ my $var = $static ? 'static const ' : '';
+ print $fh "\n${var}encpage_t $name\[",
    scalar(@{$a->{'Entries'}}), "] = {\n";
  foreach my $b (@{$a->{'Entries'}})
   {
@@ -978,7 +1024,7 @@ sub make_makefile_pl
 {
     eval { require Encode; };
     $@ and die "You need to install Encode to use enc2xs -M\nerror: $@\n";
-    # our used for variable expanstion
+    # our used for variable expansion
     $_Enc2xs = $0;
     $_Version = $VERSION;
     $_E2X = find_e2x();
@@ -1005,7 +1051,7 @@ sub make_configlocal_pm {
     $@ and die "Unable to require Encode: $@\n";
     eval { require File::Spec; };
 
-    # our used for variable expanstion
+    # our used for variable expantion
     my %in_core = map { $_ => 1 } (
         'ascii',      'iso-8859-1', 'utf8',
         'ascii-ctrl', 'null',       'utf-8-strict'
@@ -1022,9 +1068,9 @@ sub make_configlocal_pm {
 	$mod =~ s/.*\bEncode\b/Encode/o;
 	$mod =~ s/\.pm\z//o;
 	$mod =~ s,/,::,og;
-	warn qq{ require $mod;\n};
 	eval qq{ require $mod; };
-	$@ and die "Can't require $mod: $@\n";
+        return if $@;
+        warn qq{ require $mod;\n};
 	for my $enc ( Encode->encodings() ) {
 	    no warnings;
 	    $in_core{$enc}                   and next;
@@ -1038,7 +1084,7 @@ sub make_configlocal_pm {
         $_ModLines .=
           qq(\$Encode::ExtModule{'$enc'} = "$LocalMod{$enc}";\n);
     }
-    warn $_ModLines;
+    warn $_ModLines if $_ModLines;
     $_LocalVer = _mkversion();
     $_E2X      = find_e2x();
     $_Inc      = $INC{"Encode.pm"};
@@ -1107,7 +1153,7 @@ add a new encoding, just read this chapter and forget the rest.
 
 =over 4
 
-=item 0.
+=item 0.Z<>
 
 Have a .ucm file ready.  You can get it from somewhere or you can write
 your own from scratch or you can grab one from the Encode distribution
@@ -1118,7 +1164,7 @@ in I<my.ucm>.  C<$> is a shell prompt.
   $ ls -F
   my.ucm
 
-=item 1.
+=item 1.Z<>
 
 Issue a command as follows;
 
@@ -1141,7 +1187,7 @@ The following files were created.
 
 =over 4
 
-=item 1.1.
+=item 1.1.Z<>
 
 If you want *.ucm installed together with the modules, do as follows;
 
@@ -1151,20 +1197,20 @@ If you want *.ucm installed together with the modules, do as follows;
 
 =back
 
-=item 2.
+=item 2.Z<>
 
 Edit the files generated.  You don't have to if you have no time AND no
 intention to give it to someone else.  But it is a good idea to edit
 the pod and to add more tests.
 
-=item 3.
+=item 3.Z<>
 
 Now issue a command all Perl Mongers love:
 
   $ perl Makefile.PL
   Writing Makefile for Encode::My
 
-=item 4.
+=item 4.Z<>
 
 Now all you have to do is make.
 
@@ -1185,7 +1231,7 @@ The time it takes varies depending on how fast your machine is and
 how large your encoding is.  Unless you are working on something big
 like euc-tw, it won't take too long.
 
-=item 5.
+=item 5.Z<>
 
 You can "make install" already but you should test first.
 
@@ -1198,11 +1244,11 @@ You can "make install" already but you should test first.
   Files=1, Tests=2,  0 wallclock secs
    ( 0.09 cusr + 0.01 csys = 0.09 CPU)
 
-=item 6.
+=item 6.Z<>
 
 If you are content with the test result, just "make install"
 
-=item 7.
+=item 7.Z<>
 
 If you want to add your encoding to Encode's demand-loading list
 (so you don't have to "use Encode::YourEncoding"), run

@@ -1,10 +1,10 @@
 package Module::Signature;
-$Module::Signature::VERSION = '0.70';
+$Module::Signature::VERSION = '0.79';
 
 use 5.005;
 use strict;
 use vars qw($VERSION $SIGNATURE @ISA @EXPORT_OK);
-use vars qw($Preamble $Cipher $Debug $Verbose $Timeout);
+use vars qw($Preamble $Cipher $Debug $Verbose $Timeout $AUTHOR);
 use vars qw($KeyServer $KeyServerPort $AutoKeyRetrieve $CanKeyRetrieve);
 
 use constant CANNOT_VERIFY       => '0E0';
@@ -18,6 +18,7 @@ use constant CIPHER_UNKNOWN      => -6;
 
 use ExtUtils::Manifest ();
 use Exporter;
+use File::Spec;
 
 @EXPORT_OK      = (
     qw(sign verify),
@@ -26,6 +27,7 @@ use Exporter;
 );
 @ISA            = 'Exporter';
 
+$AUTHOR         = $ENV{MODULE_SIGNATURE_AUTHOR};
 $SIGNATURE      = 'SIGNATURE';
 $Timeout        = $ENV{MODULE_SIGNATURE_TIMEOUT} || 3;
 $Verbose        = $ENV{MODULE_SIGNATURE_VERBOSE} || 0;
@@ -56,6 +58,8 @@ sub _cipher_map {
     my @lines = split /\015?\012/, $sigtext;
     my %map;
     for my $line (@lines) {
+        last if $line eq '-----BEGIN PGP SIGNATURE-----';
+        next if $line =~ /^---/ .. $line eq '';
         my($cipher,$digest,$file) = split " ", $line, 3;
         return unless defined $file;
         $map{$file} = [$cipher, $digest];
@@ -64,7 +68,7 @@ sub _cipher_map {
 }
 
 sub verify {
-    my %args = ( skip => 1, @_ );
+    my %args = ( skip => $ENV{TEST_SIGNATURE}, @_ );
     my $rv;
 
     (-r $SIGNATURE) or do {
@@ -115,6 +119,8 @@ sub _verify {
     my $sigtext   = shift || '';
     my $plaintext = shift || '';
 
+    # Avoid loading modules from relative paths in @INC.
+    local @INC = grep { File::Spec->file_name_is_absolute($_) } @INC;
     local $SIGNATURE = $signature if $signature ne $SIGNATURE;
 
     if ($AutoKeyRetrieve and !$CanKeyRetrieve) {
@@ -177,6 +183,11 @@ sub _fullcheck {
         ($mani, $file) = ExtUtils::Manifest::fullcheck();
     }
     else {
+        my $_maniskip = &ExtUtils::Manifest::maniskip;
+        local *ExtUtils::Manifest::maniskip = sub { sub {
+            return unless $skip;
+            return $_maniskip->(@_);
+        } };
         ($mani, $file) = ExtUtils::Manifest::fullcheck();
     }
 
@@ -236,6 +247,11 @@ sub _verify_gpg {
 
     my $keyserver = _keyserver($version);
 
+    require File::Temp;
+    my $fh = File::Temp->new();
+    print $fh $sigtext || _read_sigfile($SIGNATURE);
+    close $fh;
+
     my $gpg = _which_gpg();
     my @quiet = $Verbose ? () : qw(-q --logger-fd=1);
     my @cmd = (
@@ -244,7 +260,7 @@ sub _verify_gpg {
             ($AutoKeyRetrieve and $version ge '1.0.7')
                 ? '--keyserver-options=auto-key-retrieve'
                 : ()
-        ) : ()), $SIGNATURE
+        ) : ()), $fh->filename
     );
 
     my $output = '';
@@ -256,6 +272,7 @@ sub _verify_gpg {
         my $cmd = join ' ', @cmd;
         $output = `$cmd`;
     }
+    unlink $fh->filename;
 
     if( $? ) {
         print STDERR $output;
@@ -284,7 +301,7 @@ sub _verify_crypt_openpgp {
     my $pgp = Crypt::OpenPGP->new(
         ($KeyServer) ? ( KeyServer => $KeyServer, AutoKeyRetrieve => $AutoKeyRetrieve ) : (),
     );
-    my $rv = $pgp->handle( Filename => $SIGNATURE )
+    my $rv = $pgp->handle( Data => $sigtext )
         or die $pgp->errstr;
 
     return SIGNATURE_BAD if (!$rv->{Validity} and $AutoKeyRetrieve);
@@ -307,32 +324,35 @@ sub _read_sigfile {
     my $well_formed;
 
     local *D;
-    open D, $sigfile or die "Could not open $sigfile: $!";
+    open D, "< $sigfile" or die "Could not open $sigfile: $!";
 
     if ($] >= 5.006 and <D> =~ /\r/) {
         close D;
-        open D, $sigfile or die "Could not open $sigfile: $!";
+        open D, '<', $sigfile or die "Could not open $sigfile: $!";
         binmode D, ':crlf';
     } else {
         close D;
-        open D, $sigfile or die "Could not open $sigfile: $!";
+        open D, "< $sigfile" or die "Could not open $sigfile: $!";
     }
 
+    my $begin = "-----BEGIN PGP SIGNED MESSAGE-----\n";
+    my $end = "-----END PGP SIGNATURE-----\n";
     while (<D>) {
-        next if (1 .. /^-----BEGIN PGP SIGNED MESSAGE-----/);
-        last if /^-----BEGIN PGP SIGNATURE/;
-
+        next if (1 .. ($_ eq $begin));
         $signature .= $_;
+        return "$begin$signature" if $_ eq $end;
     }
 
-    return ((split(/\n+/, $signature, 2))[1]);
+    return;
 }
 
 sub _compare {
     my ($str1, $str2, $ok) = @_;
 
     # normalize all linebreaks
+    $str1 =~ s/^-----BEGIN PGP SIGNED MESSAGE-----\n(?:.+\n)*\n//;
     $str1 =~ s/[^\S ]+/\n/g; $str2 =~ s/[^\S ]+/\n/g;
+    $str1 =~ s/-----BEGIN PGP SIGNATURE-----\n(?:.+\n)*$//;
 
     return $ok if $str1 eq $str2;
 
@@ -343,7 +363,7 @@ sub _compare {
     }
     else {
         local (*D, *S);
-        open S, $SIGNATURE or die "Could not open $SIGNATURE: $!";
+        open S, "< $SIGNATURE" or die "Could not open $SIGNATURE: $!";
         open D, "| diff -u $SIGNATURE -" or (warn "Could not call diff: $!", return SIGNATURE_MISMATCH);
         while (<S>) {
             print D $_ if (1 .. /^-----BEGIN PGP SIGNED MESSAGE-----/);
@@ -399,7 +419,9 @@ sub _sign_gpg {
     my $gpg = _which_gpg();
 
     local *D;
-    open D, "| $gpg --clearsign >> $sigfile.tmp" or die "Could not call $gpg: $!";
+    my $set_key = '';
+    $set_key = "--default-key $AUTHOR" if($AUTHOR);
+    open D, "| $gpg $set_key --clearsign >> $sigfile.tmp" or die "Could not call $gpg: $!";
     print D $plaintext;
     close D;
 
@@ -408,9 +430,9 @@ sub _sign_gpg {
         die "Cannot find $sigfile.tmp, signing aborted.\n";
     };
 
-    open D, "$sigfile.tmp" or die "Cannot open $sigfile.tmp: $!";
+    open D, "< $sigfile.tmp" or die "Cannot open $sigfile.tmp: $!";
 
-    open S, ">$sigfile" or do {
+    open S, "> $sigfile" or do {
         unlink "$sigfile.tmp";
         die "Could not write to $sigfile: $!";
     };
@@ -532,18 +554,23 @@ sub _mkdigest {
 
 sub _digest_object {
     my($algorithm) = @_;
+
+    # Avoid loading Digest::* from relative paths in @INC.
+    local @INC = grep { File::Spec->file_name_is_absolute($_) } @INC;
+
+    # Constrain algorithm name to be of form ABC123.
+    my ($base, $variant) = ($algorithm =~ /^([_a-zA-Z]+)([0-9]+)$/g)
+        or die "Malformed algorithm name: $algorithm (should match /\\w+\\d+/)";
+
     my $obj = eval { Digest->new($algorithm) } || eval {
-        my ($base, $variant) = ($algorithm =~ /^(\w+?)(\d+)$/g) or die;
         require "Digest/$base.pm"; "Digest::$base"->new($variant)
     } || eval {
         require "Digest/$algorithm.pm"; "Digest::$algorithm"->new
     } || eval {
-        my ($base, $variant) = ($algorithm =~ /^(\w+?)(\d+)$/g) or die;
         require "Digest/$base/PurePerl.pm"; "Digest::$base\::PurePerl"->new($variant)
     } || eval {
         require "Digest/$algorithm/PurePerl.pm"; "Digest::$algorithm\::PurePerl"->new
     } or do { eval {
-        my ($base, $variant) = ($algorithm =~ /^(\w+?)(\d+)$/g) or die;
         warn "Unknown cipher: $algorithm, please install Digest::$base, Digest::$base$variant, or Digest::$base\::PurePerl\n";
     } and return } or do {
         warn "Unknown cipher: $algorithm, please install Digest::$algorithm\n"; return;
@@ -588,7 +615,7 @@ sub _mkdigest_files {
         }
         else {
             local *F;
-            open F, $file or die "Cannot open $file for reading: $!";
+            open F, "< $file" or die "Cannot open $file for reading: $!";
             if (-B $file) {
                 binmode(F);
                 $obj->addfile(*F);
@@ -922,6 +949,9 @@ If you are already using B<Test::More> for testing, a more
 straightforward version of F<t/0-signature.t> can be found in the
 B<Module::Signature> distribution.
 
+Note that C<MANIFEST.SKIP> is considered by default only when
+C<$ENV{TEST_SIGNATURE}> is set to a true value.
+
 Also, if you prefer a more full-fledged testing package, and are
 willing to inflict the dependency of B<Module::Build> on your users,
 Iain Truskett's B<Test::Signature> might be a better choice.
@@ -936,9 +966,11 @@ L<ExtUtils::Manifest>, L<Crypt::OpenPGP>, L<Test::Signature>
 
 L<Module::Install>, L<ExtUtils::MakeMaker>, L<Module::Build>
 
+L<Dist::Zilla::Plugin::Signature>
+
 =head1 AUTHORS
 
-唐鳳 E<lt>cpan@audreyt.orgE<gt>
+Audrey Tang E<lt>cpan@audreyt.orgE<gt>
 
 =head1 CC0 1.0 Universal
 

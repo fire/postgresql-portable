@@ -3,10 +3,10 @@ package Sub::Exporter::Progressive;
 use strict;
 use warnings;
 
-our $VERSION = '0.001008';
+our $VERSION = '0.001011';
 
-use Carp 'croak';
-use List::Util 'first';
+use Carp ();
+use List::Util ();
 
 sub import {
    my ($self, @args) = @_;
@@ -23,12 +23,14 @@ sub import {
       use strict;
       my ($self, @args) = @_;
 
-      if (first { ref || !m/ \A [:-]? \w+ \z /xm } @args) {
-         croak 'your usage of Sub::Exporter::Progressive requires Sub::Exporter to be installed'
+      if (List::Util::first { ref || !m/ \A [:-]? \w+ \z /xm } @args) {
+         Carp::croak 'your usage of Sub::Exporter::Progressive requires Sub::Exporter to be installed'
             unless eval { require Sub::Exporter };
          $full_exporter ||= Sub::Exporter::build_exporter($export_data->{original});
 
          goto $full_exporter;
+      } elsif (defined(my $num = List::Util::first { !ref and m/^\d/ } @args)) {
+         die "cannot export symbols with a leading digit: '$num'";
       } else {
          require Exporter;
          s/ \A - /:/xm for @args;
@@ -59,25 +61,25 @@ sub sub_export_options {
       for my $opt (keys %options) {
          if ($opt eq 'exports') {
 
-            croak $too_complicated if ref $options{exports} ne 'ARRAY';
+            Carp::croak $too_complicated if ref $options{exports} ne 'ARRAY';
             @exports = @{$options{exports}};
-            croak $too_complicated if first { ref } @exports;
+            Carp::croak $too_complicated if List::Util::first { ref } @exports;
 
          } elsif ($opt eq 'groups') {
             %tags = %{$options{groups}};
             for my $tagset (values %tags) {
-               croak $too_complicated if first { / \A - (?! all \b ) /x || ref } @{$tagset};
+               Carp::croak $too_complicated if List::Util::first { / \A - (?! all \b ) /x || ref } @{$tagset};
             }
             @defaults = @{$tags{default} || [] };
          } else {
-            croak $too_complicated;
+            Carp::croak $too_complicated;
          }
       }
       @{$_} = map { / \A  [:-] all \z /x ? @exports : $_ } @{$_} for \@defaults, values %tags;
       $tags{all} ||= [ @exports ];
       my %exports = map { $_ => 1 } @exports;
       my @errors = grep { not $exports{$_} } @defaults;
-      croak join(', ', @errors) . " is not exported by the $inner_target module\n" if @errors;
+      Carp::croak join(', ', @errors) . " is not exported by the $inner_target module\n" if @errors;
    }
 
    return {
@@ -103,7 +105,7 @@ Sub::Exporter::Progressive - Only use Sub::Exporter if you need it
  use Sub::Exporter::Progressive -setup => {
    exports => [qw( break gather gathered take )],
    groups => {
-     defaults => [qw( break gather gathered take )],
+     default => [qw( break gather gathered take )],
    },
  };
 
@@ -123,7 +125,7 @@ L<Sub::Exporter> is an incredibly powerful module, but with that power comes
 great responsibility, er- as well as some runtime penalties.  This module
 is a C<Sub::Exporter> wrapper that will let your users just use L<Exporter>
 if all they are doing is picking exports, but use C<Sub::Exporter> if your
-users try to use C<Sub::Exporter>'s more advanced features features, like
+users try to use C<Sub::Exporter>'s more advanced features, like
 renaming exports, if they try to use them.
 
 Note that this module will export C<@EXPORT>, C<@EXPORT_OK> and

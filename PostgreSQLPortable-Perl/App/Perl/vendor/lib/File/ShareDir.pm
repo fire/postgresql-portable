@@ -107,6 +107,8 @@ exception.
 
 use 5.005;
 use strict;
+use warnings;
+
 use Carp             ();
 use Config           ();
 use Exporter         ();
@@ -115,7 +117,7 @@ use Class::Inspector ();
 
 use vars qw{ $VERSION @ISA @EXPORT_OK %EXPORT_TAGS };
 BEGIN {
-	$VERSION     = '1.03';
+	$VERSION     = '1.102';
 	@ISA         = qw{ Exporter };
 	@EXPORT_OK   = qw{
 		dist_dir
@@ -559,8 +561,9 @@ Adam Kennedy E<lt>adamk@cpan.orgE<gt>
 
 =head1 SEE ALSO
 
-L<File::HomeDir>, L<Module::Install>, L<Module::Install::Share>,
-L<File::ShareDir::PAR>
+L<File::ShareDir::Install>, L<File::HomeDir>,
+L<Module::Install>, L<Module::Install::Share>,
+L<File::ShareDir::PAR>, L<Dist::Zilla::Plugin::ShareDir>
 
 =head1 COPYRIGHT
 

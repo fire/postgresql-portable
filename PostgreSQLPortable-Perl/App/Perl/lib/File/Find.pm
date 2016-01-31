@@ -3,7 +3,7 @@ use 5.006;
 use strict;
 use warnings;
 use warnings::register;
-our $VERSION = '1.20';
+our $VERSION = '1.27';
 require Exporter;
 require Cwd;
 
@@ -280,6 +280,14 @@ links that don't resolve:
          -l && !-e && print "bogus link: $File::Find::name\n";
     }
 
+Note that you may mix directories and (non-directory) files in the list of 
+directories to be searched by the C<wanted()> function.
+
+    find(\&wanted, "./foo", "./bar", "./baz/epsilon");
+
+In the example above, no file in F<./baz/> other than F<./baz/epsilon> will be
+evaluated by C<wanted()>.
+
 See also the script C<pfind> on CPAN for a nice application of this
 module.
 
@@ -291,7 +299,7 @@ situations. You can disable these warnings by putting the statement
 
     no warnings 'File::Find';
 
-in the appropriate scope. See L<perllexwarn> for more info about lexical
+in the appropriate scope. See L<warnings> for more info about lexical
 warnings.
 
 =head1 CAVEAT
@@ -480,7 +488,7 @@ sub _find_opt {
 	$cwd = VMS::Filespec::unixpath($cwd);
 
 	# Apparently this is not expected to have a trailing space.
-	# To attempt to make VMS/UNIX conversions mostly reversable,
+	# To attempt to make VMS/UNIX conversions mostly reversible,
 	# a trailing slash is needed.  The run-time functions ignore the
 	# resulting double slash, but it causes the perl tests to fail.
         $cwd =~ s#/\z##;
@@ -515,6 +523,7 @@ sub _find_opt {
     Proc_Top_Item:
     foreach my $TOP (@_) {
 	my $top_item = $TOP;
+	$top_item = VMS::Filespec::unixify($top_item) if $Is_VMS;
 
 	($topdev,$topino,$topmode,$topnlink) = $follow ? stat $top_item : lstat $top_item;
 
@@ -800,7 +809,7 @@ sub _find_dir($$$) {
 		else {
 		    $tmp = join('/',('..') x ($CdLvl-$Level));
 		}
-		die "Can't cd to $tmp from $dir_name"
+		die "Can't cd to $tmp from $dir_name: $!"
 		    unless chdir ($tmp);
 		$CdLvl = $Level;
 	    }
@@ -973,14 +982,16 @@ sub _find_dir_symlnk($$$) {
 	    # ignore if invalid symlink
 	    unless (defined $new_loc) {
 	        if (!defined -l _ && $dangling_symlinks) {
+                $fullname = undef;
 	            if (ref $dangling_symlinks eq 'CODE') {
 	                $dangling_symlinks->($FN, $dir_pref);
 	            } else {
 	                warnings::warnif "$dir_pref$FN is a dangling symbolic link\n";
 	            }
 	        }
-
-	        $fullname = undef;
+            else {
+                $fullname = $loc_pref . $FN;
+            }
 	        $name = $dir_pref . $FN;
 	        $_ = ($no_chdir ? $name : $FN);
 	        { $wanted_callback->() };
@@ -1095,8 +1106,7 @@ $File::Find::current_dir = File::Spec->curdir || '.';
 
 $File::Find::dont_use_nlink = 1
     if $^O eq 'os2' || $^O eq 'dos' || $^O eq 'amigaos' || $Is_Win32 ||
-       $^O eq 'interix' || $^O eq 'cygwin' || $^O eq 'epoc' || $^O eq 'qnx' ||
-	   $^O eq 'nto';
+       $^O eq 'interix' || $^O eq 'cygwin' || $^O eq 'qnx' || $^O eq 'nto';
 
 # Set dont_use_nlink in your hint file if your system's stat doesn't
 # report the number of links in a directory as an indication

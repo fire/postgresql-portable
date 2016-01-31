@@ -1,31 +1,17 @@
 @rem = '--*-Perl-*--
 @echo off
 if "%OS%" == "Windows_NT" goto WinNT
-IF EXIST "%~dp0perl.exe" (
-"%~dp0perl.exe" -x -S "%0" %1 %2 %3 %4 %5 %6 %7 %8 %9
-) ELSE IF EXIST "%~dp0..\..\bin\perl.exe" (
-"%~dp0..\..\bin\perl.exe" -x -S "%0" %1 %2 %3 %4 %5 %6 %7 %8 %9
-) ELSE (
 perl -x -S "%0" %1 %2 %3 %4 %5 %6 %7 %8 %9
-)
-
 goto endofperl
 :WinNT
-IF EXIST "%~dp0perl.exe" (
-"%~dp0perl.exe" -x -S %0 %*
-) ELSE IF EXIST "%~dp0..\..\bin\perl.exe" (
-"%~dp0..\..\bin\perl.exe" -x -S %0 %*
-) ELSE (
 perl -x -S %0 %*
-)
-
 if NOT "%COMSPEC%" == "%SystemRoot%\system32\cmd.exe" goto endofperl
 if %errorlevel% == 9009 echo You do not have Perl in your PATH.
 if errorlevel 1 goto script_failed_so_exit_with_non_zero_val 2>nul
 goto endofperl
 @rem ';
 #!/usr/bin/perl -w
-#line 29
+#line 15
 
 =head1 NAME
 
@@ -64,7 +50,7 @@ Another benefit is that it will keep you updated about its progress
 and that you don't have much options to worry about.
 
 Use the C<-a> option to save the file in text (ascii) mode.  Might
-make a difference on dosish systems.
+make a difference on DOSish systems.
 
 =head1 EXAMPLE
 
@@ -106,7 +92,7 @@ unless (getopts('as', \%opt)) {
 my $url = URI->new(decode(locale => shift) || usage());
 my $argfile = encode(locale_fs => decode(locale => shift));
 usage() if defined($argfile) && !length($argfile);
-my $VERSION = "6.00";
+my $VERSION = "6.15";
 
 my $ua = LWP::UserAgent->new(
    agent => "lwp-download/$VERSION ",

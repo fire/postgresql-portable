@@ -47,7 +47,7 @@ use vars qw(
              "CPAN/Tarzip.pm",
              "CPAN/Version.pm",
             );
-$VERSION = "5.5002";
+$VERSION = "5.5005";
 # record the initial timestamp for reload.
 $reload = { map {$INC{$_} ? ($_,(stat $INC{$_})[9]) : ()} @relo };
 @CPAN::Shell::ISA = qw(CPAN::Debug);
@@ -206,7 +206,7 @@ sub a {
 sub globls {
     my($self,$s,$pragmas) = @_;
     # ls is really very different, but we had it once as an ordinary
-    # command in the Shell (upto rev. 321) and we could not handle
+    # command in the Shell (up to rev. 321) and we could not handle
     # force well then
     my(@accept,@preexpand);
     if ($s =~ /[\*\?\/]/) {
@@ -374,6 +374,9 @@ sub o {
         if (!@o_what or $cfilter) { # print all things, "o conf"
             $cfilter ||= "";
             my $qrfilter = eval 'qr/$cfilter/';
+            if ($@) {
+                $CPAN::Frontend->mydie("Cannot parse commandline: $@");
+            }
             my($k,$v);
             my $configpm = CPAN::HandleConfig->require_myconfig_or_config;
             $CPAN::Frontend->myprint("\$CPAN::Config options from $configpm\:\n");
@@ -604,7 +607,7 @@ sub _reload_this {
     CPAN->debug("file[$file]") if $CPAN::DEBUG;
     my @inc = @INC;
     unless ($file && -f $file) {
-        # this thingie is not in the INC path, maybe CPAN/MyConfig.pm?
+        # this thingy is not in the INC path, maybe CPAN/MyConfig.pm?
         $file = $INC{$f};
         unless (CPAN->has_inst("File::Basename")) {
             @inc = File::Basename::dirname($file);
@@ -626,9 +629,12 @@ sub _reload_this {
     if ($must_reload) {
         my $fh = FileHandle->new($file) or
             $CPAN::Frontend->mydie("Could not open $file: $!");
-        local($/);
-        local $^W = 1;
-        my $content = <$fh>;
+        my $content;
+        {
+            local($/);
+            local $^W = 1;
+            $content = <$fh>;
+        }
         CPAN->debug(sprintf("reload file[%s] content[%s...]",$file,substr($content,0,128)))
             if $CPAN::DEBUG;
         delete $INC{$f};
@@ -767,6 +773,31 @@ sub scripts {
         }
         $CPAN::Frontend->myprint("$highest\n");
     }
+}
+
+sub _guess_manpage {
+    my($self,$d,$contains,$dist) = @_;
+    $dist =~ s/-/::/g;
+    my $module;
+    if (exists $contains->{$dist}) {
+        $module = $dist;
+    } elsif (1 == keys %$contains) {
+        ($module) = keys %$contains;
+    }
+    my $manpage;
+    if ($module) {
+        my $m = $self->expand("Module",$module);
+        $m->as_string; # called for side-effects, shame
+        $manpage = $m->{MANPAGE};
+    } else {
+        $manpage = "unknown";
+    }
+    return $manpage;
+}
+
+#-> sub CPAN::Shell::_specfile ;
+sub _specfile {
+    die "CPAN::Shell::_specfile() has been moved to CPAN::Plugin::Specfile::post_test()";
 }
 
 #-> sub CPAN::Shell::report ;
@@ -1040,6 +1071,41 @@ sub u {
 #-> sub CPAN::Shell::failed ;
 sub failed {
     my($self,$only_id,$silent) = @_;
+    my @failed = $self->find_failed($only_id);
+    my $scope;
+    if ($only_id) {
+        $scope = "this command";
+    } elsif ($CPAN::Index::HAVE_REANIMATED) {
+        $scope = "this or a previous session";
+        # it might be nice to have a section for previous session and
+        # a second for this
+    } else {
+        $scope = "this session";
+    }
+    if (@failed) {
+        my $print;
+        my $debug = 0;
+        if ($debug) {
+            $print = join "",
+                map { sprintf "%5d %-45s: %s %s\n", @$_ }
+                    sort { $a->[0] <=> $b->[0] } @failed;
+        } else {
+            $print = join "",
+                map { sprintf " %-45s: %s %s\n", @$_[1..3] }
+                    sort {
+                        $a->[0] <=> $b->[0]
+                            ||
+                                $a->[4] <=> $b->[4]
+                       } @failed;
+        }
+        $CPAN::Frontend->myprint("Failed during $scope:\n$print");
+    } elsif (!$only_id || !$silent) {
+        $CPAN::Frontend->myprint("Nothing failed in $scope\n");
+    }
+}
+
+sub find_failed {
+    my($self,$only_id) = @_;
     my @failed;
   DIST: for my $d ($CPAN::META->all_objects("CPAN::Distribution")) {
         my $failed = "";
@@ -1072,6 +1138,10 @@ sub failed {
         next DIST unless $failed;
         my $id = $d->id;
         $id =~ s|^./../||;
+        ### XXX need to flag optional modules as '(optional)' if they are
+        # from recommends/suggests -- i.e. *show* failure, but make it clear
+        # it was failure of optional module -- xdg, 2012-04-01
+        $id = "(optional) $id" if ! $d->{mandatory};
         #$print .= sprintf(
         #                  "  %-45s: %s %s\n",
         push @failed,
@@ -1083,6 +1153,7 @@ sub failed {
               $failed,
               $d->{$failed}->text,
               $d->{$failed}{TIME}||0,
+              !! $d->{mandatory},
              ] :
              [
               1,
@@ -1090,39 +1161,16 @@ sub failed {
               $failed,
               $d->{$failed},
               0,
+              !! $d->{mandatory},
              ]
             );
     }
-    my $scope;
-    if ($only_id) {
-        $scope = "this command";
-    } elsif ($CPAN::Index::HAVE_REANIMATED) {
-        $scope = "this or a previous session";
-        # it might be nice to have a section for previous session and
-        # a second for this
-    } else {
-        $scope = "this session";
-    }
-    if (@failed) {
-        my $print;
-        my $debug = 0;
-        if ($debug) {
-            $print = join "",
-                map { sprintf "%5d %-45s: %s %s\n", @$_ }
-                    sort { $a->[0] <=> $b->[0] } @failed;
-        } else {
-            $print = join "",
-                map { sprintf " %-45s: %s %s\n", @$_[1..3] }
-                    sort {
-                        $a->[0] <=> $b->[0]
-                            ||
-                                $a->[4] <=> $b->[4]
-                       } @failed;
-        }
-        $CPAN::Frontend->myprint("Failed during $scope:\n$print");
-    } elsif (!$only_id || !$silent) {
-        $CPAN::Frontend->myprint("Nothing failed in $scope\n");
-    }
+    return @failed;
+}
+
+sub mandatory_dist_failed {
+    my ($self) = @_;
+    return grep { $_->[5] } $self->find_failed($CPAN::CurrentCommandID);
 }
 
 # XXX intentionally undocumented because completely bogus, unportable,
@@ -1428,6 +1476,14 @@ sub format_result {
     my $print_ornamented_have_warned = 0;
     sub colorize_output {
         my $colorize_output = $CPAN::Config->{colorize_output};
+        if ($colorize_output && $^O eq 'MSWin32' && !$CPAN::META->has_inst("Win32::Console::ANSI")) {
+            unless ($print_ornamented_have_warned++) {
+                # no myprint/mywarn within myprint/mywarn!
+                warn "Colorize_output is set to true but Win32::Console::ANSI is not
+installed. To activate colorized output, please install Win32::Console::ANSI.\n\n";
+            }
+            $colorize_output = 0;
+        }
         if ($colorize_output && !$CPAN::META->has_inst("Term::ANSIColor")) {
             unless ($print_ornamented_have_warned++) {
                 # no myprint/mywarn within myprint/mywarn!
@@ -1461,7 +1517,7 @@ sub print_ornamented {
     }
     if ($self->colorize_output) {
         if ( $CPAN::DEBUG && $swhat =~ /^Debug\(/ ) {
-            # if you want to have this configurable, please file a bugreport
+            # if you want to have this configurable, please file a bug report
             $ornament = $CPAN::Config->{colorize_debug} || "black on_cyan";
         }
         my $color_on = eval { Term::ANSIColor::color($ornament) } || "";
@@ -1591,6 +1647,7 @@ sub unrecoverable_error {
 
 #-> sub CPAN::Shell::mysleep ;
 sub mysleep {
+    return if $ENV{AUTOMATED_TESTING} || ! -t STDOUT;
     my($self, $sleep) = @_;
     if (CPAN->has_inst("Time::HiRes")) {
         Time::HiRes::sleep($sleep);
@@ -1700,7 +1757,7 @@ sub rematein {
                     }
                 }
             }
-            CPAN::Queue->queue_item(qmod => $obj->id, reqtype => "c");
+            CPAN::Queue->queue_item(qmod => $obj->id, reqtype => "c", optional => '');
             push @qcopy, $obj;
         } elsif ($CPAN::META->exists('CPAN::Author',uc($s))) {
             $obj = $CPAN::META->instance('CPAN::Author',uc($s));
@@ -1738,6 +1795,7 @@ to find objects with matching identifiers.
         my $obj;
         my $s = $q->as_string;
         my $reqtype = $q->reqtype || "";
+        my $optional = $q->optional || "";
         $obj = CPAN::Shell->expandany($s);
         unless ($obj) {
             # don't know how this can happen, maybe we should panic,
@@ -1750,6 +1808,23 @@ to find objects with matching identifiers.
             next QITEM;
         }
         $obj->{reqtype} ||= "";
+        my $type = ref $obj;
+        if ( $type eq 'CPAN::Distribution' || $type eq 'CPAN::Bundle' ) {
+            $obj->{mandatory} ||= ! $optional; # once mandatory, always mandatory
+        }
+        elsif ( $type eq 'CPAN::Module' ) {
+            $obj->{mandatory} ||= ! $optional; # once mandatory, always mandatory
+            if (my $d = $obj->distribution) {
+                $d->{mandatory} ||= ! $optional; # once mandatory, always mandatory
+            } elsif ($optional) {
+                # the queue object does not know who was recommending/suggesting us:(
+                # So we only vaguely write "optional".
+                $CPAN::Frontend->mywarn("Warning: optional module '$s' ".
+                                        "not known. Skipping.\n");
+                CPAN::Queue->delete_first($s);
+                next QITEM;
+            }
+        }
         {
             # force debugging because CPAN::SQLite somehow delivers us
             # an empty object;
@@ -1812,11 +1887,18 @@ to find objects with matching identifiers.
             }
             CPAN->debug("Going to panic. meth[$meth]s[$s]") if $CPAN::DEBUG;
             $CPAN::Frontend->mydie("Panic: obj[$serialized] cannot meth[$meth]");
-        } elsif ($obj->$meth()) {
-            CPAN::Queue->delete($s);
-            CPAN->debug("From queue deleted. meth[$meth]s[$s]") if $CPAN::DEBUG;
         } else {
-            CPAN->debug("Failed. pragma[@pragma]meth[$meth]") if $CPAN::DEBUG;
+            my $upgraded_meth = $meth;
+            if ( $meth eq "make" and $obj->{reqtype} eq "b" ) {
+                # rt 86915
+                $upgraded_meth = "test";
+            }
+            if ($obj->$upgraded_meth()) {
+                CPAN::Queue->delete($s);
+                CPAN->debug("Succeeded and deleted from queue. pragma[@pragma]meth[$meth][s][$s]") if $CPAN::DEBUG;
+            } else {
+                CPAN->debug("Failed. pragma[@pragma]meth[$meth]s[$s]") if $CPAN::DEBUG;
+            }
         }
 
         $obj->undelay;
@@ -1826,10 +1908,14 @@ to find objects with matching identifiers.
                 $obj->$unpragma();
             }
         }
-        if ($CPAN::Config->{halt_on_failure}
-                &&
-                    CPAN::Distrostatus::something_has_just_failed()
-              ) {
+        # if any failures occurred and the current object is mandatory, we
+        # still don't know if *it* failed or if it was another (optional)
+        # module, so we have to check that explicitly (and expensively)
+        if (    $CPAN::Config->{halt_on_failure}
+            && $obj->{mandatory}
+            && CPAN::Distrostatus::something_has_just_failed()
+            && $self->mandatory_dist_failed()
+        ) {
             $CPAN::Frontend->mywarn("Stopping: '$meth' failed for '$s'.\n");
             CPAN::Queue->nullify_queue;
             last QITEM;

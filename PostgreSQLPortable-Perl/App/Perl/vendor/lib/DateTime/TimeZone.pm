@@ -1,8 +1,5 @@
 package DateTime::TimeZone;
-{
-  $DateTime::TimeZone::VERSION = '1.57';
-}
-
+$DateTime::TimeZone::VERSION = '1.94';
 use 5.006;
 
 use strict;
@@ -12,8 +9,11 @@ use DateTime::TimeZone::Catalog;
 use DateTime::TimeZone::Floating;
 use DateTime::TimeZone::Local;
 use DateTime::TimeZone::OffsetOnly;
+use DateTime::TimeZone::OlsonDB::Change;
 use DateTime::TimeZone::UTC;
+use Module::Runtime qw( require_module );
 use Params::Validate 0.72 qw( validate validate_pos SCALAR ARRAYREF BOOLEAN );
+use Try::Tiny;
 
 use constant INFINITY => 100**1000;
 use constant NEG_INFINITY => -1 * ( 100**1000 );
@@ -44,7 +44,7 @@ sub new {
         $p{name} = $DateTime::TimeZone::Catalog::LINKS{ uc $p{name} };
     }
 
-    unless ( $p{name} =~ m,/,
+    unless ( $p{name} =~ m{/}
         || $SpecialName{ $p{name} } ) {
         if ( $p{name} eq 'floating' ) {
             return DateTime::TimeZone::Floating->instance;
@@ -62,19 +62,26 @@ sub new {
     }
 
     my $subclass = $p{name};
-    $subclass =~ s/-/_/g;
     $subclass =~ s{/}{::}g;
+    $subclass =~ s/-(\d)/_Minus$1/;
+    $subclass =~ s/\+/_Plus/;
+    $subclass =~ s/-/_/g;
+
     my $real_class = "DateTime::TimeZone::$subclass";
 
-    die "The timezone '$p{name}' in an invalid name.\n"
+    die "The timezone '$p{name}' is an invalid name.\n"
         unless $real_class =~ /^\w+(::\w+)*$/;
 
     unless ( $real_class->can('instance') ) {
-        my $e = do {
-            local $@;
+        ($real_class) = $real_class =~ m{\A([a-zA-Z0-9_]+(?:::[a-zA-Z0-9_]+)*)\z};
+
+        my $e;
+        try {
             local $SIG{__DIE__};
-            eval "require $real_class";
-            $@;
+            require_module($real_class);
+        }
+        catch {
+            $e = $_;
         };
 
         if ($e) {
@@ -102,7 +109,7 @@ sub new {
 
         if ( $object_version ne $catalog_version ) {
             warn
-                "Loaded $real_class, which is from an older version ($object_version) of the Olson database than this installation of DateTime::TimeZone ($catalog_version).\n";
+                "Loaded $real_class, which is from a different version ($object_version) of the Olson database than this installation of DateTime::TimeZone ($catalog_version).\n";
         }
     }
 
@@ -192,7 +199,7 @@ sub _span_for_datetime {
     unless ( defined $span ) {
         my $err = 'Invalid local time for date';
         $err .= ' ' . $dt->iso8601 if $type eq 'utc';
-        $err .= " in time zone: " . $self->name;
+        $err .= ' in time zone: ' . $self->name;
         $err .= "\n";
 
         die $err;
@@ -331,9 +338,8 @@ sub _generate_spans_until_match {
                     seconds => $self->{last_observance}->total_offset
                         + $rule->offset_from_std
                 ),
-                short_name => sprintf(
-                    $self->{last_observance}->format, $rule->letter
-                ),
+                short_name => $self->{last_observance}
+                    ->formatted_short_name( $rule->letter ),
                 observance => $self->{last_observance},
                 rule       => $rule,
                 );
@@ -392,12 +398,13 @@ sub name { $_[0]->{name} }
 sub category { ( split /\//, $_[0]->{name}, 2 )[0] }
 
 sub is_valid_name {
-    my $tz;
-    {
-        local $@;
+    my $class = shift;
+    my $name  = shift;
+
+    my $tz = try {
         local $SIG{__DIE__};
-        $tz = eval { $_[0]->new( name => $_[1] ) };
-    }
+        $class->new( name => $name );
+    };
 
     return $tz && $tz->isa('DateTime::TimeZone') ? 1 : 0;
 }
@@ -432,13 +439,11 @@ sub STORABLE_thaw {
 # Functions
 #
 sub offset_as_seconds {
-    {
-        local $@;
-        local $SIG{__DIE__};
-        shift if eval { $_[0]->isa('DateTime::TimeZone') };
-    }
-
     my $offset = shift;
+    $offset = shift if try {
+        local $SIG{__DIE__};
+        $offset->isa('DateTime::TimeZone');
+    };
 
     return undef unless defined $offset;
 
@@ -469,13 +474,11 @@ sub offset_as_seconds {
 }
 
 sub offset_as_string {
-    {
-        local $@;
-        local $SIG{__DIE__};
-        shift if eval { $_[0]->isa('DateTime::TimeZone') };
-    }
-
     my $offset = shift;
+    $offset = shift if try {
+        local $SIG{__DIE__};
+        $offset->isa('DateTime::TimeZone');
+    };
 
     return undef unless defined $offset;
     return undef unless $offset >= -359999 && $offset <= 359999;
@@ -561,7 +564,7 @@ DateTime::TimeZone - Time zone object base class and factory
 
 =head1 VERSION
 
-version 1.57
+version 1.94
 
 =head1 SYNOPSIS
 
@@ -579,10 +582,19 @@ This class is the base class for all time zone objects.  A time zone
 is represented internally as a set of observances, each of which
 describes the offset from GMT for a given time period.
 
-Note that without the C<DateTime.pm> module, this module does not do
-much.  It's primary interface is through a C<DateTime> object, and
+Note that without the L<DateTime> module, this module does not do
+much.  It's primary interface is through a L<DateTime> object, and
 most users will not need to directly use C<DateTime::TimeZone>
 methods.
+
+=head2 Special Case Platforms
+
+If you are on the Win32 platform, you will want to also install
+L<DateTime::TimeZone::Local::Win32>. This will enable you to specify a time
+zone of C<'local'> when creating a L<DateTime> object.
+
+If you are on HPUX, install L<DateTime::TimeZone::HPUX>. This provides support
+for HPUX style time zones like C<'MET-1METDST'>.
 
 =head1 USAGE
 
@@ -837,9 +849,49 @@ flag to see what they can be used for.
 
 Dave Rolsky <autarch@urth.org>
 
+=head1 CONTRIBUTORS
+
+=for stopwords Alexey Molchanov Alfie John Daisuke Maki David Pinkowitz Iain Truskett Joshua Hoblitt Karen Etheridge Peter Rabbitson
+
+=over 4
+
+=item *
+
+Alexey Molchanov <alexey.molchanov@gmail.com>
+
+=item *
+
+Alfie John <alfiej@fastmail.fm>
+
+=item *
+
+Daisuke Maki <dmaki@cpan.org>
+
+=item *
+
+David Pinkowitz <dave@pinkowitz.com>
+
+=item *
+
+Iain Truskett <deceased>
+
+=item *
+
+Joshua Hoblitt <jhoblitt@cpan.org>
+
+=item *
+
+Karen Etheridge <ether@cpan.org>
+
+=item *
+
+Peter Rabbitson <ribasushi@cpan.org>
+
+=back
+
 =head1 COPYRIGHT AND LICENSE
 
-This software is copyright (c) 2013 by Dave Rolsky.
+This software is copyright (c) 2015 by Dave Rolsky.
 
 This is free software; you can redistribute it and/or modify it under
 the same terms as the Perl 5 programming language system itself.

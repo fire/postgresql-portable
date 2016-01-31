@@ -1,8 +1,13 @@
-# $Id: Index.pm 35 2011-06-17 01:34:42Z stro $
+# $Id: Index.pm 53 2015-07-14 23:14:34Z stro $
 
 package CPAN::SQLite::Index;
 use strict;
 use warnings;
+
+our $VERSION = '0.211';
+
+use English qw/-no_match_vars/;
+
 use CPAN::SQLite::Info;
 use CPAN::SQLite::State;
 use CPAN::SQLite::Populate;
@@ -10,9 +15,8 @@ use CPAN::SQLite::DBI qw($tables);
 use File::Spec::Functions qw(catfile);
 use File::Basename;
 use File::Path;
-use LWP::Simple qw(getstore is_success);
+use HTTP::Tiny;
 
-our $VERSION = '0.202';
 unless ($ENV{CPAN_SQLITE_NO_LOG_FILES}) {
   $ENV{CPAN_SQLITE_DEBUG} = 1;
 }
@@ -55,6 +59,23 @@ sub index {
         $oldout = error_fh($log);
     }
 
+    my $log_cleanup = $ENV{'CPAN_SQLITE_LOG_FILES_CLEANUP'};
+    $log_cleanup = 30 unless defined $log_cleanup;
+    if ($log_cleanup and $log_cleanup =~ /^\d+$/) {
+      if (opendir(my $DIR, $self->{'log_dir'})) {
+        my @files = grep { /cpan_sqlite_log\./ } readdir $DIR;
+        closedir $DIR;
+
+        @files = grep { -C $_ > $log_cleanup } map { catfile($self->{'log_dir'}, $_) } @files;
+
+        if (@files) {
+          $CPAN::FrontEnd->myprint('Cleaning old log files ... ');
+          unlink @files;
+          $CPAN::FrontEnd->myprint("Done.\n");
+        }
+      }
+    }
+
     if ($self->{'update_indices'}) {
         $CPAN::FrontEnd->myprint('Fetching index files ... ');
         if ($self->fetch_cpan_indices()) {
@@ -90,7 +111,7 @@ sub index {
         $CPAN::FrontEnd->mywarn("Failed\n");
         return;
     }
-    
+
     return 1;
 }
 
@@ -98,21 +119,33 @@ sub fetch_cpan_indices {
   my $self = shift;
 
   my $CPAN = $self->{CPAN};
-  my $indices = {'01mailrc.txt.gz' => 'authors',
-         '02packages.details.txt.gz' => 'modules',
-         '03modlist.data.gz' => 'modules',
-        };
+  my $indices = {
+    '01mailrc.txt.gz' => 'authors',
+    '02packages.details.txt.gz' => 'modules',
+    '03modlist.data.gz' => 'modules',
+  };
+
   foreach my $index (keys %$indices) {
     my $file = catfile($CPAN, $indices->{$index}, $index);
     next if (-e $file and -M $file < 1);
     my $dir = dirname($file);
     unless (-d $dir) {
-      mkpath($dir, 1, oct(755)) or die "Cannot mkpath $dir: $!";
+      mkpath($dir, 0, oct(755)) or die "Cannot mkpath $dir: $!";
     }
     my @urllist = @{$self->{urllist}};
     foreach my $cpan(@urllist) {
       my $from = join '/', ($cpan, $indices->{$index}, $index);
-      last if is_success(getstore($from, $file));
+      if (my $response = HTTP::Tiny->new->get($from)) {
+        if ($response->{'success'}) {
+          if (open(my $FILE, '>', $file)) {
+            binmode $FILE;
+            print $FILE $response->{'content'};
+            if (close($FILE)) {
+              next;
+            }
+          }
+        }
+      }
     }
     unless (-f $file) {
       $CPAN::FrontEnd->mywarn("Cannot retrieve '$file'");
@@ -127,7 +160,7 @@ sub fetch_info {
   my %wanted = map {$_ => $self->{$_}} qw(CPAN ignore keep_source_where);
   my $info = CPAN::SQLite::Info->new(%wanted);
   $info->fetch_info() or return;
-  my @tables = qw(dists mods auths);
+  my @tables = qw(dists mods auths info);
   my $index;
   foreach my $table(@tables) {
     my $class = __PACKAGE__ . '::' . $table;
@@ -141,8 +174,7 @@ sub fetch_info {
 sub state {
   my $self = shift;
 
-  my %wanted = map {$_ => $self->{$_}} 
-    qw(db_name index setup reindex db_dir);
+  my %wanted = map {$_ => $self->{$_}} qw(db_name index setup reindex db_dir);
   my $state = CPAN::SQLite::State->new(%wanted);
   $state->state() or return;
   $self->{state} = $state;
@@ -151,8 +183,7 @@ sub state {
 
 sub populate {
   my $self = shift;
-  my %wanted = map {$_ => $self->{$_}} 
-    qw(db_name index setup state db_dir);
+  my %wanted = map {$_ => $self->{$_}} qw(db_name index setup state db_dir);
   my $db = CPAN::SQLite::Populate->new(%wanted);
   $db->populate() or return;
   return 1;
@@ -172,18 +203,20 @@ sub error_fh {
 sub DESTROY {
   unless ($ENV{CPAN_SQLITE_NO_LOG_FILES}) {
     close STDOUT;
-    open(STDOUT, '>&', $oldout);
+    open(STDOUT, '>&', $oldout) if $oldout;
   }
   return;
 }
 
 1;
 
-__END__
-
 =head1 NAME
 
 CPAN::SQLite::Index - set up or update database tables.
+
+=head1 VERSION
+
+version 0.211
 
 =head1 SYNOPSIS
 
@@ -224,7 +257,7 @@ Calling
 
 will start the indexing procedure. Various messages
 detailing the progress will written to I<STDOUT>,
-which by default will be captured into a file 
+which by default will be captured into a file
 F<cpan_sqlite_log.dddddddddd>, where the extension
 is the C<time> that the method was invoked. Error messages
 are not captured, and will appear in I<STDERR>.
@@ -235,14 +268,14 @@ The steps of the indexing procedure are as follows.
 
 =item * fetch index data
 
-The necessary CPAN index files 
+The necessary CPAN index files
 F<$CPAN/authors/01mailrc.txt.gz>,
 F<$CPAN/modules/02packages.details.txt.gz>, and
 F<$CPAN/modules/03modlist.data.gz> will be fetched
 from the CPAN mirror specified by the C<$cpan> variable
 at the beginning of L<CPAN::SQLite::Index>. If you are
 using this option, it is recommended to use the
-same CPAN mirror with subsequent updates, to ensure consistency 
+same CPAN mirror with subsequent updates, to ensure consistency
 of the database. As well, the information on the locations
 of the CPAN mirrors used for Template-Toolkit and GeoIP
 is written.
@@ -258,9 +291,9 @@ Unless the C<setup> argument within the C<new>
 method of L<CPAN::SQLite::Index> is specified,
 this will get information on the state of the database
 through L<CPAN::SQLite::State>.
-A comparision is then made between this information
+A comparison is then made between this information
 and that gathered from the CPAN indices, and if there's
-a discrepency in some items, those items are marked
+a discrepancy in some items, those items are marked
 for either insertion, updating, or deletion, as appropriate.
 
 =item * populate the database
@@ -274,7 +307,7 @@ existing ones, or deleting obsolete items.
 
 =head1 SEE ALSO
 
-L<CPAN::SQLite::Info>, L<CPAN::SQLite::State>, 
+L<CPAN::SQLite::Info>, L<CPAN::SQLite::State>,
 L<CPAN::SQLite::Populate>,
 and L<CPAN::SQLite::Util>.
 Development takes place on the CPAN-SQLite project
@@ -288,7 +321,7 @@ Serguei Trouchelle E<lt>stro@cpan.orgE<gt>
 
 =head1 COPYRIGHT
 
-Copyright 2006 by Randy Kobes E<lt>r.kobes@uwinnipeg.caE<gt>. 
+Copyright 2006 by Randy Kobes E<lt>r.kobes@uwinnipeg.caE<gt>.
 
 Copyright 2011 by Serguei Trouchelle E<lt>stro@cpan.orgE<gt>.
 

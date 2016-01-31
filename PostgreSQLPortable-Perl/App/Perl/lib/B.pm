@@ -15,7 +15,7 @@ require Exporter;
 # walkoptree comes from B.xs
 
 BEGIN {
-    $B::VERSION = '1.35';
+    $B::VERSION = '1.48';
     @B::EXPORT_OK = ();
 
     # Our BOOT code needs $VERSION set, and will append to @EXPORT_OK.
@@ -35,8 +35,7 @@ push @B::EXPORT_OK, (qw(minus_c ppname save_BEGINs
 			parents comppadlist sv_undef compile_stats timing_info
 			begin_av init_av check_av end_av regex_padav dowarn
 			defstash curstash warnhook diehook inc_gv @optype
-			@specialsv_name
-		      ), $] > 5.009 && 'unitcheck_av');
+			@specialsv_name unitcheck_av));
 
 @B::SV::ISA = 'B::OBJECT';
 @B::NULL::ISA = 'B::SV';
@@ -49,10 +48,9 @@ push @B::EXPORT_OK, (qw(minus_c ppname save_BEGINs
 @B::PVNV::ISA = qw(B::PVIV B::NV);
 @B::PVMG::ISA = 'B::PVNV';
 @B::REGEXP::ISA = 'B::PVMG' if $] >= 5.011;
-# Change in the inheritance hierarchy post 5.9.0
-@B::PVLV::ISA = $] > 5.009 ? 'B::GV' : 'B::PVMG';
-# BM is eliminated post 5.9.5, but effectively is a specialisation of GV now.
-@B::BM::ISA = $] > 5.009005 ? 'B::GV' : 'B::PVMG';
+@B::INVLIST::ISA = 'B::PV'  if $] >= 5.019;
+@B::PVLV::ISA = 'B::GV';
+@B::BM::ISA = 'B::GV';
 @B::AV::ISA = 'B::PVMG';
 @B::GV::ISA = 'B::PVMG';
 @B::HV::ISA = 'B::PVMG';
@@ -92,11 +90,13 @@ sub B::GV::SAFENAME {
   # The regex below corresponds to the isCONTROLVAR macro
   # from toke.c
 
-  $name =~ s/^([\cA-\cZ\c\\c[\c]\c?\c_\c^])/"^".
-	chr( utf8::unicode_to_native( 64 ^ ord($1) ))/e;
+  $name =~ s/^\c?/^?/
+    or $name =~ s/^([\cA-\cZ\c\\c[\c]\c_\c^])/
+                "^" .  chr( utf8::unicode_to_native( 64 ^ ord($1) ))/e;
 
   # When we say unicode_to_native we really mean ascii_to_native,
-  # which matters iff this is a non-ASCII platform (EBCDIC).
+  # which matters iff this is a non-ASCII platform (EBCDIC).  '\c?' would
+  # not have to be special cased, except for non-ASCII.
 
   return $name;
 }
@@ -253,7 +253,8 @@ sub walksymtable {
     my $fullname;
     no strict 'refs';
     $prefix = '' unless defined $prefix;
-    while (($sym, $ref) = each %$symref) {
+    foreach my $sym ( sort keys %$symref ) {
+        $ref= $symref->{$sym};
         $fullname = "*main::".$prefix.$sym;
 	if ($sym =~ /::$/) {
 	    $sym = $prefix . $sym;
@@ -405,6 +406,8 @@ underlying structures are freed.
 =item amagic_generation
 
 Returns the SV object corresponding to the C variable C<amagic_generation>.
+As of Perl 5.18, this is just an alias to C<PL_na>, so its value is
+meaningless.
 
 =item init_av
 
@@ -428,7 +431,9 @@ Returns the AV object (i.e. in class B::AV) representing END blocks.
 
 =item comppadlist
 
-Returns the AV object (i.e. in class B::AV) of the global comppadlist.
+Returns the PADLIST object (i.e. in class B::PADLIST) of the global
+comppadlist.  In Perl 5.16 and earlier it returns an AV object (class
+B::AV).
 
 =item regex_padav
 
@@ -1000,6 +1005,9 @@ in with the main SV flags, so this method is no longer present.
 
 =item PADLIST
 
+Returns a B::PADLIST object under Perl 5.18 or higher, or a B::AV in
+earlier versions.
+
 =item OUTSIDE
 
 =item OUTSIDE_SEQ
@@ -1013,6 +1021,10 @@ For constant subroutines, returns the constant SV returned by the subroutine.
 =item CvFLAGS
 
 =item const_sv
+
+=item NAME_HEK
+
+Returns the name of a lexical sub, otherwise C<undef>.
 
 =back
 
@@ -1063,7 +1075,7 @@ underlying C "inheritance":
             /     \
         B::LOOP B::PMOP
 
-Access methods correspond to the underlying C structre field names,
+Access methods correspond to the underlying C structure field names,
 with the leading "class indication" prefix (C<"op_">) removed.
 
 =head2 B::OP Methods
@@ -1161,6 +1173,10 @@ Since Perl 5.9.5
 
 Only when perl was compiled with ithreads.
 
+=item code_list
+
+Since perl 5.17.1
+
 =back
 
 =head2 B::SVOP METHOD
@@ -1211,7 +1227,7 @@ Only when perl was compiled with ithreads.
 
 =item stashpv
 
-=item stashlen
+=item stashoff (threaded only)
 
 =item file
 
@@ -1230,6 +1246,53 @@ Only when perl was compiled with ithreads.
 =item hints_hash
 
 =back
+
+=head2 OTHER CLASSES
+
+Perl 5.18 introduces a new class, B::PADLIST, returned by B::CV's
+C<PADLIST> method.
+
+=head2 B::PADLIST Methods
+
+=over 4
+
+=item MAX
+
+=item ARRAY
+
+A list of pads.  The first one contains the names.  These are currently
+B::AV objects, but that is likely to change in future versions.
+
+=item ARRAYelt
+
+Like C<ARRAY>, but takes an index as an argument to get only one element,
+rather than a list of all of them.
+
+=item REFCNT
+
+=back
+
+=head2 $B::overlay
+
+Although the optree is read-only, there is an overlay facility that allows
+you to override what values the various B::*OP methods return for a
+particular op. C<$B::overlay> should be set to reference a two-deep hash:
+indexed by OP address, then method name. Whenever a an op method is
+called, the value in the hash is returned if it exists. This facility is
+used by B::Deparse to "undo" some optimisations. For example:
+
+
+    local $B::overlay = {};
+    ...
+    if ($op->name eq "foo") {
+        $B::overlay->{$$op} = {
+                name => 'bar',
+                next => $op->next->next,
+        };
+    }
+    ...
+    $op->name # returns "bar"
+    $op->next # returns the next op but one
 
 
 =head1 AUTHOR

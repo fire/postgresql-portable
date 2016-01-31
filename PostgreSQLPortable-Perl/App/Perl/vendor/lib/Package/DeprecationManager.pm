@@ -1,13 +1,13 @@
 package Package::DeprecationManager;
-{
-  $Package::DeprecationManager::VERSION = '0.13';
-}
 
 use strict;
 use warnings;
 
+our $VERSION = '0.15';
+
 use Carp qw( croak );
-use List::MoreUtils qw( any );
+use List::Util 1.33 qw( any );
+use Package::Stash;
 use Params::Util qw( _HASH0 );
 use Sub::Install;
 
@@ -21,10 +21,18 @@ sub import {
 
     my %registry;
 
-    my $import = _build_import( \%registry );
-    my $warn = _build_warn( \%registry, $args{-deprecations}, $args{-ignore} );
-
     my $caller = caller();
+
+    my $orig_import = $caller->can('import');
+
+    my $import = _build_import( \%registry, $orig_import );
+    my $warn
+        = _build_warn( \%registry, $args{-deprecations}, $args{-ignore} );
+
+    # We need to remove this to prevent a 'subroutine redefined' warning.
+    if ($orig_import) {
+        Package::Stash->new($caller)->remove_symbol('&import');
+    }
 
     Sub::Install::install_sub(
         {
@@ -46,16 +54,34 @@ sub import {
 }
 
 sub _build_import {
-    my $registry = shift;
+    my $registry    = shift;
+    my $orig_import = shift;
 
     return sub {
         my $class = shift;
-        my %args  = @_;
 
-        $args{-api_version} ||= delete $args{-compatible};
+        my @args;
 
-        $registry->{ caller() } = $args{-api_version}
-            if $args{-api_version};
+        my $api_version;
+        ## no critic (ControlStructures::ProhibitCStyleForLoops)
+        for ( my $i = 0; $i < @_; $i++ ) {
+            if ( $_[$i] eq '-api_version' || $_[$i] eq '-compatible' ) {
+                $api_version = $_[ ++$i ];
+            }
+            else {
+                push @args, $_[$i];
+            }
+        }
+        ## use critic
+
+        my $caller = caller();
+        $registry->{$caller} = $api_version
+            if defined $api_version;
+
+        if ($orig_import) {
+            @_ = ( $class, @args );
+            goto &{$orig_import};
+        }
 
         return;
     };
@@ -94,12 +120,12 @@ sub _build_warn {
 
         my $compat_version = $registry->{$package};
 
-        my $deprecated_at = $deprecated_at->{ $args{feature} };
+        my $at = $deprecated_at->{ $args{feature} };
 
         return
-            if defined $compat_version
-                && defined $deprecated_at
-                && $compat_version lt $deprecated_at;
+               if defined $compat_version
+            && defined $deprecated_at
+            && $compat_version lt $at;
 
         my $msg;
         if ( defined $args{message} ) {
@@ -107,8 +133,8 @@ sub _build_warn {
         }
         else {
             $msg = "$args{feature} has been deprecated";
-            $msg .= " since version $deprecated_at"
-                if defined $deprecated_at;
+            $msg .= " since version $at"
+                if defined $at;
         }
 
         return if $warned{$package}{ $args{feature} }{$msg};
@@ -127,7 +153,7 @@ sub _build_warn {
 
 # ABSTRACT: Manage deprecation warnings for your distribution
 
-
+__END__
 
 =pod
 
@@ -137,7 +163,7 @@ Package::DeprecationManager - Manage deprecation warnings for your distribution
 
 =head1 VERSION
 
-version 0.13
+version 0.15
 
 =head1 SYNOPSIS
 
@@ -206,7 +232,7 @@ C<deprecated()> sub.
 
 The C<import()> sub allows callers of I<your> class to specify an C<-api_version>
 parameter. If this is supplied, then deprecation warnings are only issued for
-deprecations for api versions earlier than the one specified.
+deprecations with API versions earlier than the one specified.
 
 You must call the C<deprecated()> sub in each deprecated subroutine. When
 called, it will issue a warning using C<Carp::cluck()>.
@@ -226,6 +252,24 @@ A given deprecation warning is only issued once for a given package. This
 module tracks this based on both the feature name I<and> the error message
 itself. This means that if you provide several different error messages for
 the same feature, all of those errors will appear.
+
+=head2 Other import() subs
+
+This module works by installing an C<import> sub in any package that uses
+it. If that package I<already> has an C<import> sub, then that C<import> will
+be called after any arguments passed for C<Package::DeprecationManager> are
+stripped out. You need to define your C<import> sub before you C<use
+Package::DeprecationManager> to make this work:
+
+  package HasExporter;
+
+  use Exporter qw( import );
+
+  use Package::DeprecationManager -deprecations => {
+      'HasExporter::foo' => '0.02',
+  };
+
+  our @EXPORT_OK = qw( some_sub another_sub );
 
 =head1 BUGS
 
@@ -261,16 +305,32 @@ created as L<Class::MOP::Deprecated> by Goro Fuji.
 
 Dave Rolsky <autarch@urth.org>
 
+=head1 CONTRIBUTORS
+
+=for stopwords Jesse Luehrs Karen Etheridge Tomas Doran
+
+=over 4
+
+=item *
+
+Jesse Luehrs <doy@tozt.net>
+
+=item *
+
+Karen Etheridge <ether@cpan.org>
+
+=item *
+
+Tomas Doran <bobtfish@bobtfish.net>
+
+=back
+
 =head1 COPYRIGHT AND LICENSE
 
-This software is Copyright (c) 2012 by Dave Rolsky.
+This software is Copyright (c) 2015 by Dave Rolsky.
 
 This is free software, licensed under:
 
   The Artistic License 2.0 (GPL Compatible)
 
 =cut
-
-
-__END__
-

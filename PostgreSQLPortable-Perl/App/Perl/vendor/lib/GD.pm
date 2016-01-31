@@ -16,7 +16,7 @@ use GD::Polygon;
 
 use vars qw($VERSION @ISA @EXPORT @EXPORT_OK %EXPORT_TAGS $AUTOLOAD);
 
-$VERSION = '2.49';
+$VERSION = '2.56';
 
 @ISA = qw(Exporter DynaLoader);
 # Items to export into callers namespace by default. Note: do not export
@@ -1376,6 +1376,8 @@ fontconfig font patterns (see stringFT).  Regardless of the value of
 $flag, this method will return a true value if the fontconfig library
 is present, or false otherwise.
 
+This method can also be called as a class method of GD::Image;
+
 =item B<$result = $image->stringFTCircle($cx,$cy,$radius,$textRadius,$fillPortion,$font,$points,$top,$bottom,$fgcolor)>
 
 This draws text in a circle. Currently (libgd 2.0.33) this function
@@ -1757,7 +1759,7 @@ These return the width and height of the font.
 =head1 Obtaining the C-language version of gd
 
 libgd, the C-language version of gd, can be obtained at URL
-http://www.boutell.com/gd/.  Directions for installing and using it
+http://libgd.org/  Directions for installing and using it
 can be found at that site.  Please do not contact me for help with
 libgd.
 
@@ -1772,7 +1774,7 @@ package for details.
 
 The latest versions of GD.pm are available at
 
-  http://stein.cshl.org/WWW/software/GD
+  https://github.com/lstein/Perl-GD
 
 =head1 SEE ALSO
 

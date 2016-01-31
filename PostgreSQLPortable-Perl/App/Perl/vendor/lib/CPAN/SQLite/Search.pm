@@ -1,15 +1,20 @@
-# $Id: Search.pm 35 2011-06-17 01:34:42Z stro $
+# $Id: Search.pm 53 2015-07-14 23:14:34Z stro $
 
 package CPAN::SQLite::Search;
 use strict;
 use warnings;
 no warnings qw(redefine);
+
+our $VERSION = '0.211';
+
+use English qw/-no_match_vars/;
+
 use utf8;
 use CPAN::SQLite::Util qw($mode_info);
 use CPAN::SQLite::DBI::Search;
 
 our $max_results = 0;
-our $VERSION = '0.202';
+
 my $cdbi_query;
 
 my %mode2obj;
@@ -97,7 +102,7 @@ sub make {
 }
 
 package CPAN::SQLite::Search::author;
-use base qw(CPAN::SQLite::Search);
+use parent 'CPAN::SQLite::Search';
 
 sub search {
   my ($self, %args) = @_;
@@ -137,14 +142,12 @@ sub search {
     next unless ($dists = $cdbi->fetch(%args, search => $search));
     $item->{dists} = (ref($dists) eq 'ARRAY') ? $dists : [$dists];
   }
-  $self->{results} = 
-    (ref($results) eq 'ARRAY' and scalar @$results == 1) ?
-      $results->[0] : $results;
+  $self->{results} = (ref($results) eq 'ARRAY' and scalar @$results == 1) ? $results->[0] : $results;
   return 1;
 }
 
 package CPAN::SQLite::Search::module;
-use base qw(CPAN::SQLite::Search);
+use parent 'CPAN::SQLite::Search';
 
 sub search {
   my ($self, %args) = @_;
@@ -164,7 +167,7 @@ sub search {
     $args{limit} = $max_results;
   }
   my $results;
-  return unless $results = ($meta_obj ? 
+  return unless $results = ($meta_obj ?
                             $cdbi->fetch_and_set(%args, want_ids => 1) :
                             $cdbi->fetch(%args));
 # if running under CPAN.pm, need to build a list of modules
@@ -187,7 +190,7 @@ sub search {
                    };
       $seen{$dist_id}++;
       my $mods;
-      next unless $mods = $cdbi->fetch_and_set(%args, 
+      next unless $mods = $cdbi->fetch_and_set(%args,
                                                search => $search,
                                                set_list => 1,
                                                download => $item->{download});
@@ -202,7 +205,7 @@ sub search {
 }
 
 package CPAN::SQLite::Search::dist;
-use base qw(CPAN::SQLite::Search);
+use parent 'CPAN::SQLite::Search';
 
 sub search {
   my ($self, %args) = @_;
@@ -236,7 +239,7 @@ sub search {
                  };
     my $mods;
     next unless $mods = ($meta_obj ?
-                         $cdbi->fetch_and_set(%args, 
+                         $cdbi->fetch_and_set(%args,
                                               search => $search,
                                               set_list => 1,
                                               download => $item->{download}) :
@@ -270,11 +273,13 @@ sub dist_subchapter {
 
 1;
 
-__END__
-
 =head1 NAME
 
 CPAN::SQLite::Search - perform queries on the database
+
+=head1 VERSION
+
+version 0.211
 
 =head1 SYNOPSIS
 
@@ -288,7 +293,7 @@ CPAN::SQLite::Search - perform queries on the database
 =head1 CONSTRUCTING THE QUERY
 
 This module queries the database via various types of queries
-and returns the results for subsequent display. The 
+and returns the results for subsequent display. The
 C<CPAN::SQLite::Search> object is created via the C<new> method as
 
   my $query = CPAN::SQLite::Search->new(db_dir => $db_dir,
@@ -353,7 +358,7 @@ four basic options to be used for the C<$type =E<gt> $value> option:
 
 =item * query =E<gt> $query_term
 
-This will search through module names, 
+This will search through module names,
 distribution names, or CPAN author names and ids
 (for C<module>, C<dist>, and C<author> modes
 respectively). The results are case insensitive,
@@ -403,7 +408,7 @@ of the C<auths> table. As well, an array reference
 C<$results-E<gt>{dists}> is returned representing
 all distributions associated with that C<cpanid> - each
 member of the array reference is a hash reference
-describing the C<dist_id>, C<dist_name>, 
+describing the C<dist_id>, C<dist_name>,
 C<dist_abs>, C<dist_vers>, and C<dist_file> fields in the
 C<dists> table. An additional entry, C<download>, is
 supplied, which can be used as C<$CPAN/authors/id/$download>
@@ -412,7 +417,7 @@ to specify the url of the distribution.
 =item * C<query> query
 
 If this results in more than one match, an array reference
-is returned, each member of which is a hash reference containg
+is returned, each member of which is a hash reference containing
 the C<auth_id>, C<cpanid>, and C<fullname> fields. If there
 is only one result found, a C<name> query based on the
 matched C<cpanid> is performed.
@@ -427,7 +432,7 @@ matched C<cpanid> is performed.
 
 This returns the C<mod_id>, C<mod_name>, C<mod_abs>, C<mod_vers>,
 C<dslip>, C<chapterid>, C<dist_id>, C<dist_name>, C<dist_file>,
-C<auth_id>, C<cpanid>, C<fullname>, and C<email> 
+C<auth_id>, C<cpanid>, C<fullname>, and C<email>
 of the C<auths>, C<mods>, and C<dists> tables.
 As well, the following entries may be present.
 
@@ -520,11 +525,10 @@ Serguei Trouchelle E<lt>stro@cpan.orgE<gt>
 
 =head1 COPYRIGHT
 
-Copyright 2006,2008 by Randy Kobes E<lt>r.kobes@uwinnipeg.caE<gt>. 
+Copyright 2006,2008 by Randy Kobes E<lt>r.kobes@uwinnipeg.caE<gt>.
 
-Copyright 2011 by Serguei Trouchelle E<lt>stro@cpan.orgE<gt>.
+Copyright 2011-2013 by Serguei Trouchelle E<lt>stro@cpan.orgE<gt>.
 
 Use and redistribution are under the same terms as Perl itself.
 
 =cut
-

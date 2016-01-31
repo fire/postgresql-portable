@@ -1,19 +1,18 @@
 package DateTime::TimeZone::Local::Unix;
-{
-  $DateTime::TimeZone::Local::Unix::VERSION = '1.57';
-}
-
+$DateTime::TimeZone::Local::Unix::VERSION = '1.94';
 use strict;
 use warnings;
 
 use Cwd 3;
+use Try::Tiny;
+
 use parent 'DateTime::TimeZone::Local';
 
 sub Methods {
     return qw(
         FromEnv
-        FromEtcLocaltime
         FromEtcTimezone
+        FromEtcLocaltime
         FromEtcTIMEZONE
         FromEtcSysconfigClock
         FromEtcDefaultInit
@@ -22,11 +21,17 @@ sub Methods {
 
 sub EnvVars { return 'TZ' }
 
+our $EtcDir = '/etc';
+
+sub _EtcFile {
+    shift;
+    return File::Spec->catfile( $EtcDir, @_ );
+}
+
 sub FromEtcLocaltime {
     my $class = shift;
 
-    my $lt_file = '/etc/localtime';
-
+    my $lt_file = $class->_EtcFile('localtime');
     return unless -r $lt_file && -s _;
 
     my $real_name;
@@ -51,12 +56,10 @@ sub FromEtcLocaltime {
                 : $parts[$x]
             );
 
-            my $tz;
-            {
-                local $@;
+            my $tz = try {
                 local $SIG{__DIE__};
-                $tz = eval { DateTime::TimeZone->new( name => $name ) };
-            }
+                DateTime::TimeZone->new( name => $name );
+            };
 
             return $tz if $tz;
         }
@@ -71,12 +74,13 @@ sub _Readlink {
     return Cwd::abs_path($link);
 }
 
+our $ZoneinfoDir = '/usr/share/zoneinfo';
 # for systems where /etc/localtime is a copy of a zoneinfo file
 sub _FindMatchingZoneinfoFile {
     my $class         = shift;
     my $file_to_match = shift;
 
-    return unless -d '/usr/share/zoneinfo';
+    return unless -d $ZoneinfoDir;
 
     require File::Basename;
     require File::Compare;
@@ -85,10 +89,10 @@ sub _FindMatchingZoneinfoFile {
     my $size = -s $file_to_match;
 
     my $real_name;
-    local $@;
-    local $SIG{__DIE__};
-    local $_;
-    eval {
+    try {
+        local $SIG{__DIE__};
+        local $_;
+
         File::Find::find(
             {
                 wanted => sub {
@@ -113,92 +117,91 @@ sub _FindMatchingZoneinfoFile {
                 },
                 no_chdir => 1,
             },
-            '/usr/share/zoneinfo',
+            $ZoneinfoDir,
         );
+    }
+    catch {
+        die $_ unless ref $_ && $_->{found};
     };
 
-    if ($@) {
-        return $real_name if ref $@ && $@->{found};
-        die $@;
-    }
+    return $real_name;
 }
 
 sub FromEtcTimezone {
     my $class = shift;
 
-    my $tz_file = '/etc/timezone';
-
+    my $tz_file = $class->_EtcFile('timezone');
     return unless -f $tz_file && -r _;
 
-    local *TZ;
-    open TZ, "<$tz_file"
+    open my $fh, '<', $tz_file
         or die "Cannot read $tz_file: $!";
-    my $name = join '', <TZ>;
-    close TZ;
+    my $name = join '', <$fh>;
+    close $fh;
 
     $name =~ s/^\s+|\s+$//g;
 
     return unless $class->_IsValidName($name);
 
-    local $@;
-    local $SIG{__DIE__};
-    return eval { DateTime::TimeZone->new( name => $name ) };
+    return try {
+        local $SIG{__DIE__};
+        DateTime::TimeZone->new( name => $name );
+    };
 }
 
 sub FromEtcTIMEZONE {
     my $class = shift;
 
-    my $tz_file = '/etc/TIMEZONE';
-
+    my $tz_file = $class->_EtcFile('TIMEZONE');
     return unless -f $tz_file && -r _;
 
-    local *TZ;
-    open TZ, "<$tz_file"
+    open my $fh, '<', $tz_file
         or die "Cannot read $tz_file: $!";
 
     my $name;
-    while ( defined( $name = <TZ> ) ) {
+    while ( defined( $name = <$fh> ) ) {
         if ( $name =~ /\A\s*TZ\s*=\s*(\S+)/ ) {
             $name = $1;
             last;
         }
     }
 
-    close TZ;
+    close $fh;
 
     return unless $class->_IsValidName($name);
 
-    local $@;
-    local $SIG{__DIE__};
-    return eval { DateTime::TimeZone->new( name => $name ) };
+    return try {
+        local $SIG{__DIE__};
+        DateTime::TimeZone->new( name => $name );
+    };
 }
 
 # RedHat uses this
 sub FromEtcSysconfigClock {
     my $class = shift;
 
-    return unless -r "/etc/sysconfig/clock" && -f _;
+    my $clock_file = $class->_EtcFile('sysconfig/clock');
+    return unless -r $clock_file && -f _;
 
-    my $name = $class->_ReadEtcSysconfigClock();
+    my $name = $class->_ReadEtcSysconfigClock($clock_file);
 
     return unless $class->_IsValidName($name);
 
-    local $@;
-    local $SIG{__DIE__};
-    return eval { DateTime::TimeZone->new( name => $name ) };
+    return try {
+        local $SIG{__DIE__};
+        DateTime::TimeZone->new( name => $name );
+    };
 }
 
-# this is a sparate function so that it can be overridden in the test
-# suite
+# this is a separate function so that it can be overridden in the test suite
 sub _ReadEtcSysconfigClock {
-    my $class = shift;
+    my $class      = shift;
+    my $clock_file = shift;
 
-    local *CLOCK;
-    open CLOCK, '</etc/sysconfig/clock'
-        or die "Cannot read /etc/sysconfig/clock: $!";
+    open my $fh, '<', $clock_file
+        or die "Cannot read $clock_file: $!";
 
     local $_;
-    while (<CLOCK>) {
+    while (<$fh>) {
         return $1 if /^(?:TIME)?ZONE="([^"]+)"/;
     }
 }
@@ -206,28 +209,30 @@ sub _ReadEtcSysconfigClock {
 sub FromEtcDefaultInit {
     my $class = shift;
 
-    return unless -r "/etc/default/init" && -f _;
+    my $init_file = $class->_EtcFile('default/init');
+    return unless -r $init_file && -f _;
 
-    my $name = $class->_ReadEtcDefaultInit();
+    my $name = $class->_ReadEtcDefaultInit($init_file);
 
     return unless $class->_IsValidName($name);
 
-    local $@;
-    local $SIG{__DIE__};
-    return eval { DateTime::TimeZone->new( name => $name ) };
+    return try {
+        local $SIG{__DIE__};
+        DateTime::TimeZone->new( name => $name );
+    };
 }
 
 # this is a separate function so that it can be overridden in the test
 # suite
 sub _ReadEtcDefaultInit {
-    my $class = shift;
+    my $class     = shift;
+    my $init_file = shift;
 
-    local *INIT;
-    open INIT, '</etc/default/init'
-        or die "Cannot read /etc/default/init: $!";
+    open my $fh, '<', $init_file
+        or die "Cannot read $init_file: $!";
 
     local $_;
-    while (<INIT>) {
+    while (<$fh>) {
         return $1 if /^TZ=(.+)/;
     }
 }
@@ -246,7 +251,7 @@ DateTime::TimeZone::Local::Unix - Determine the local system's time zone on Unix
 
 =head1 VERSION
 
-version 1.57
+version 1.94
 
 =head1 SYNOPSIS
 
@@ -312,7 +317,7 @@ Dave Rolsky <autarch@urth.org>
 
 =head1 COPYRIGHT AND LICENSE
 
-This software is copyright (c) 2013 by Dave Rolsky.
+This software is copyright (c) 2015 by Dave Rolsky.
 
 This is free software; you can redistribute it and/or modify it under
 the same terms as the Perl 5 programming language system itself.

@@ -1,33 +1,21 @@
 @rem = '--*-Perl-*--
 @echo off
 if "%OS%" == "Windows_NT" goto WinNT
-IF EXIST "%~dp0perl.exe" (
-"%~dp0perl.exe" -x -S "%0" %1 %2 %3 %4 %5 %6 %7 %8 %9
-) ELSE IF EXIST "%~dp0..\..\bin\perl.exe" (
-"%~dp0..\..\bin\perl.exe" -x -S "%0" %1 %2 %3 %4 %5 %6 %7 %8 %9
-) ELSE (
 perl -x -S "%0" %1 %2 %3 %4 %5 %6 %7 %8 %9
-)
-
 goto endofperl
 :WinNT
-IF EXIST "%~dp0perl.exe" (
-"%~dp0perl.exe" -x -S %0 %*
-) ELSE IF EXIST "%~dp0..\..\bin\perl.exe" (
-"%~dp0..\..\bin\perl.exe" -x -S %0 %*
-) ELSE (
 perl -x -S %0 %*
-)
-
 if NOT "%COMSPEC%" == "%SystemRoot%\system32\cmd.exe" goto endofperl
 if %errorlevel% == 9009 echo You do not have Perl in your PATH.
 if errorlevel 1 goto script_failed_so_exit_with_non_zero_val 2>nul
 goto endofperl
 @rem ';
 #!/usr/bin/perl
-#line 29
+#line 15
 
 $VERSION = '0.06';
+
+=encoding utf8
 
 =head1 NAME
 
@@ -78,7 +66,7 @@ my $cmd = $cmd{substr($op, 0, 1)};
 (system("perldoc $0"), exit) if $cmd eq 'help';
 my @args;
 push @args, (overwrite => '1')	if $cmd eq 'sign';
-push @args, (skip => '0')	unless grep /^-?-?skip/, @ARGV;
+push @args, (skip => '1')	if grep /^-?-?skip/, @ARGV;
 
 if (my $sub = Module::Signature->can($cmd)) {
     if (@ARGV and -e $ARGV[-1]) {
@@ -110,14 +98,14 @@ L<Module::Signature>
 
 Audrey Tang E<lt>autrijus@autrijus.orgE<gt>
 
-=head1 COPYRIGHT
+=head1 CC0 1.0 Universal
 
-Copyright 2002, 2003, 2006 by Audrey Tang.
+To the extent possible under law, 唐鳳 has waived all copyright and related
+or neighboring rights to Module-Signature.
 
-This program is free software; you can redistribute it and/or 
-modify it under the same terms as Perl itself.
+This work is published from Taiwan.
 
-See L<http://www.perl.com/perl/misc/Artistic.html>
+L<http://creativecommons.org/publicdomain/zero/1.0>
 
 =cut
 

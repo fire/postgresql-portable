@@ -1,31 +1,17 @@
 @rem = '--*-Perl-*--
 @echo off
 if "%OS%" == "Windows_NT" goto WinNT
-IF EXIST "%~dp0perl.exe" (
-"%~dp0perl.exe" -x -S "%0" %1 %2 %3 %4 %5 %6 %7 %8 %9
-) ELSE IF EXIST "%~dp0..\..\bin\perl.exe" (
-"%~dp0..\..\bin\perl.exe" -x -S "%0" %1 %2 %3 %4 %5 %6 %7 %8 %9
-) ELSE (
 perl -x -S "%0" %1 %2 %3 %4 %5 %6 %7 %8 %9
-)
-
 goto endofperl
 :WinNT
-IF EXIST "%~dp0perl.exe" (
-"%~dp0perl.exe" -x -S %0 %*
-) ELSE IF EXIST "%~dp0..\..\bin\perl.exe" (
-"%~dp0..\..\bin\perl.exe" -x -S %0 %*
-) ELSE (
 perl -x -S %0 %*
-)
-
 if NOT "%COMSPEC%" == "%SystemRoot%\system32\cmd.exe" goto endofperl
 if %errorlevel% == 9009 echo You do not have Perl in your PATH.
 if errorlevel 1 goto script_failed_so_exit_with_non_zero_val 2>nul
 goto endofperl
 @rem ';
 #!/usr/bin/perl
-#line 29
+#line 15
 
 # zipdetails
 #
@@ -204,7 +190,7 @@ my %Extras = (
 
        );
 
-my $VERSION = "1.05" ;
+my $VERSION = "1.06" ;
 
 my $FH;
 
@@ -374,6 +360,8 @@ sub out
     $TEXT    = $text;
     $VALUE   = mySpr $format,  @_;
        
+    no warnings;
+
     write;
 }
 
@@ -1091,6 +1079,17 @@ sub walkExtra
     
     my $count = 0 ;
     
+    if ($XLEN < ZIP_EXTRA_SUBFIELD_ID_SIZE + ZIP_EXTRA_SUBFIELD_LEN_SIZE)
+    {
+        # Android zipalign is prime candidate for this non-standard extra field.
+        myRead($payload, $XLEN); 
+        my $data = hexDump($payload);
+        
+        out $payload, "Malformed Extra Data", $data;
+
+        return undef;
+    }
+
     while ($offset < $XLEN) {
 
         ++ $count;
@@ -2116,7 +2115,7 @@ error message.
 The primary reference for Zip files is the "appnote" document available at
 L<http://www.pkware.com/documents/casestudies/APPNOTE.TXT>.
 
-An alternative is the Info-Zip appnote. This is available from
+An alternative reference is the Info-Zip appnote. This is available from
 L<ftp://ftp.info-zip.org/pub/infozip/doc/>
 
 
@@ -2124,7 +2123,8 @@ The C<zipinfo> program that comes with the info-zip distribution
 (L<http://www.info-zip.org/>) can also display details of the structure of
 a zip file.
 
-See also L<IO::Compress::Zip>, L<IO::Uncompress::Unzip>.
+See also L<Archive::Zip::SimpleZip>, L<IO::Compress::Zip>,
+L<IO::Uncompress::Unzip>.
 
 
 =head1 AUTHOR
@@ -2133,7 +2133,7 @@ Paul Marquess F<pmqs@cpan.org>.
 
 =head1 COPYRIGHT 
 
-Copyright (c) 2011-2012 Paul Marquess. All rights reserved.
+Copyright (c) 2011-2013 Paul Marquess. All rights reserved.
 
 This program is free software; you can redistribute it and/or modify it
 under the same terms as Perl itself. 

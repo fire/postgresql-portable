@@ -3,7 +3,7 @@ use strict;
 use warnings;
 package Sub::Exporter;
 {
-  $Sub::Exporter::VERSION = '0.985';
+  $Sub::Exporter::VERSION = '0.987';
 }
 # ABSTRACT: a sophisticated exporter for custom-built routines
 
@@ -493,7 +493,7 @@ Sub::Exporter - a sophisticated exporter for custom-built routines
 
 =head1 VERSION
 
-version 0.985
+version 0.987
 
 =head1 SYNOPSIS
 
@@ -644,7 +644,7 @@ this:
 
   package Tools;
   use base qw(Exporter);
-  our @EXPORT_OK = qw(function1 function2 function2);
+  our @EXPORT_OK = qw(function1 function2 function3);
 
 Any basic use of Sub::Exporter will look like this:
 
@@ -962,7 +962,7 @@ Instead, you may write something like:
     }
   ;
 
-Finding a good reason for wanting to do this is left as as exercise for the
+Finding a good reason for wanting to do this is left as an exercise for the
 reader.
 
 =head1 COMPARISONS

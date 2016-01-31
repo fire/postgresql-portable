@@ -57,7 +57,7 @@ use PPI::Element    ();
 
 use vars qw{$VERSION @ISA *_PARENT};
 BEGIN {
-	$VERSION = '1.215';
+	$VERSION = '1.220';
 	@ISA     = 'PPI::Element';
 	*_PARENT = *PPI::Element::_PARENT;
 }
@@ -91,7 +91,7 @@ boundary, or false if it does not.
 =cut
 
 ### XS -> PPI/XS.xs:_PPI_Node__scope 0.903+
-sub scope { '' }
+sub scope() { '' }
 
 =pod
 
@@ -329,7 +329,7 @@ class name (full or shortened), or a C<CODE>/function reference.
   # The same thing with a shortened class name
   $Document->find('Quote::Single');
   
-  # Anything more elaborate, we so with the sub
+  # Anything more elaborate, we go with the sub
   $Document->find( sub {
   	# At the top level of the file...
   	$_[1]->parent == $_[0]
@@ -373,9 +373,9 @@ sub find {
 	my $wanted = $self->_wanted(shift) or return undef;
 
 	# Use a queue based search, rather than a recursive one
-	my @found = ();
+	my @found;
 	my @queue = @{$self->{children}};
-	eval {
+	my $ok = eval {
 		while ( @queue ) {
 			my $Element = shift @queue;
 			my $rv      = &$wanted( $self, $Element );
@@ -397,8 +397,9 @@ sub find {
 				unshift @queue, @{$Element->{children}};
 			}
 		}
+		1;
 	};
-	if ( $@ ) {
+	if ( !$ok ) {
 		# Caught exception thrown from the wanted function
 		return undef;
 	}
@@ -411,7 +412,7 @@ sub find {
 =head2 find_first $class | \&wanted
 
 If the normal C<find> method is like a grep, then C<find_first> is
-equivalent to the L<Scalar::Util> C<first> function.
+equivalent to the L<List::Util> C<first> function.
 
 Given an element class or a wanted function, it will search depth-first
 through a tree until it finds something that matches the condition,
@@ -431,18 +432,22 @@ sub find_first {
 
 	# Use the same queue-based search as for ->find
 	my @queue = @{$self->{children}};
-	my $rv    = eval {
+	my $rv;
+	my $ok = eval {
 		# The defined() here prevents a ton of calls to PPI::Util::TRUE
 		while ( @queue ) {
 			my $Element = shift @queue;
-			my $rv      = &$wanted( $self, $Element );
-			return $Element if $rv;
+			my $element_rv = $wanted->( $self, $Element );
+			if ( $element_rv ) {
+				$rv = $Element;
+				last;
+			}
 
 			# Support "don't descend on undef return"
-			next unless defined $rv;
+			next if !defined $element_rv;
 
 			# Skip if the Element doesn't have any children
-			next unless $Element->isa('PPI::Node');
+			next if !$Element->isa('PPI::Node');
 
 			# Depth-first keeps the queue size down and provides a
 			# better logical order.
@@ -454,8 +459,9 @@ sub find_first {
 				unshift @queue, @{$Element->{children}};
 			}
 		}
+		1;
 	};
-	if ( $@ ) {
+	if ( !$ok ) {
 		# Caught exception thrown from the wanted function
 		return undef;
 	}
@@ -530,34 +536,6 @@ and were removed, B<non-recursively>. This might also be zero, so avoid a
 simple true/false test on the return false of the C<prune> method. It
 returns C<undef> on error, which you probably B<should> test for.
 
-=begin testing prune 2
-
-# Avoids a bug in old Perls relating to the detection of scripts
-# Known to occur in ActivePerl 5.6.1 and at least one 5.6.2 install.
-my $hashbang = reverse 'lrep/nib/rsu/!#'; 
-my $document = PPI::Document->new( \<<"END_PERL" );
-$hashbang
-
-use strict;
-
-sub one { 1 }
-sub two { 2 }
-sub three { 3 }
-
-print one;
-print "\n";
-print three;
-print "\n";
-
-exit;
-END_PERL
-
-isa_ok( $document, 'PPI::Document' );
-ok( defined($document->prune ('PPI::Statement::Sub')),
-	'Pruned multiple subs ok' );
-
-=end testing
-
 =cut
 
 sub prune {
@@ -567,7 +545,7 @@ sub prune {
 	# Use a depth-first queue search
 	my $pruned = 0;
 	my @queue  = $self->children;
-	eval {
+	my $ok = eval {
 		while ( my $element = shift @queue ) {
 			my $rv = &$wanted( $self, $element );
 			if ( $rv ) {
@@ -585,8 +563,9 @@ sub prune {
 				unshift @queue, $element->children;
 			}
 		}
+		1;
 	};
-	if ( $@ ) {
+	if ( !$ok ) {
 		# Caught exception thrown from the wanted function
 		return undef;		
 	}
@@ -594,8 +573,8 @@ sub prune {
 	$pruned;
 }
 
-# This method is likely to be very heavily used, to take
-# it slowly and carefuly.
+# This method is likely to be very heavily used, so take
+# it slowly and carefully.
 ### NOTE: Renaming this function or changing either to self will probably
 ###       break File::Find::Rule::PPI
 sub _wanted {

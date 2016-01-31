@@ -1,8 +1,5 @@
 package DateTime::TimeZone::OlsonDB::Zone;
-{
-  $DateTime::TimeZone::OlsonDB::Zone::VERSION = '1.57';
-}
-
+$DateTime::TimeZone::OlsonDB::Zone::VERSION = '1.94';
 use strict;
 use warnings;
 
@@ -80,7 +77,7 @@ sub expand_observances {
             type                 => 'observance',
             utc_start_datetime   => $obs->utc_start_datetime,
             local_start_datetime => $obs->local_start_datetime,
-            short_name           => sprintf( $obs->format, $letter ),
+            short_name           => $obs->formatted_short_name($letter),
             observance           => $obs,
             $rule ? ( rule => $rule ) : (),
         );

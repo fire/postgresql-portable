@@ -78,7 +78,7 @@ use overload '""'   => 'content';
 
 use vars qw{$VERSION @ISA $errstr};
 BEGIN {
-	$VERSION = '1.215';
+	$VERSION = '1.220';
 	@ISA     = 'PPI::Node';
 	$errstr  = '';
 }
@@ -86,7 +86,7 @@ BEGIN {
 use PPI::Document::Fragment ();
 
 # Document cache
-my $CACHE = undef;
+my $CACHE;
 
 # Convenience constants related to constants
 use constant LOCATION_LINE         => 0;
@@ -176,26 +176,24 @@ sub new {
 
 		# When loading from a filename, use the caching layer if it exists.
 		if ( $CACHE ) {
-			my $file   = $source;
-			my $source = PPI::Util::_slurp( $file );
-			unless ( ref $source ) {
-				# Errors returned as plain string
-				return $class->_error($source);
-			}
+			my $file_contents = PPI::Util::_slurp( $source );
+
+			# Errors returned as plain string
+			return $class->_error($file_contents) if !ref $file_contents;
 
 			# Retrieve the document from the cache
-			my $document = $CACHE->get_document($source);
+			my $document = $CACHE->get_document($file_contents);
 			return $class->_setattr( $document, %attr ) if $document;
 
 			if ( $timeout ) {
 				eval {
 					local $SIG{ALRM} = sub { die "alarm\n" };
 					alarm( $timeout );
-					$document = PPI::Lexer->lex_source( $$source );
+					$document = PPI::Lexer->lex_source( $$file_contents );
 					alarm( 0 );
 				};
 			} else {
-				$document = PPI::Lexer->lex_source( $$source );
+				$document = PPI::Lexer->lex_source( $$file_contents );
 			}
 			if ( $document ) {
 				# Save in the cache
@@ -457,7 +455,7 @@ sub serialize {
 
 		# This token is a HereDoc.
 		# First, add the token content as normal, which in this
-		# case will definately not contain a newline.
+		# case will definitely not contain a newline.
 		$output .= $Token->content;
 
 		# Now add all of the here-doc content to the heredoc buffer.
@@ -472,7 +470,7 @@ sub serialize {
 			# from the end of a file that we silently allow.
 			#
 			# When writing back out to the file we have to
-			# auto-repair these problems if we arn't going back
+			# auto-repair these problems if we aren't going back
 			# on to the end of the file.
 
 			# When calculating $last_line, ignore the final token if
@@ -592,7 +590,7 @@ sub index_locations {
 	my @tokens = $self->tokens;
 
 	# Whenever we hit a heredoc we will need to increment by
-	# the number of lines in it's content section when when we
+	# the number of lines in it's content section when we
 	# encounter the next token with a newline in it.
 	my $heredoc = 0;
 
@@ -842,7 +840,7 @@ sub complete {
 
 # We are a scope boundary
 ### XS -> PPI/XS.xs:_PPI_Document__scope 0.903+
-sub scope { 1 }
+sub scope() { 1 }
 
 
 
