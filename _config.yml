@@ -6,17 +6,14 @@ title: PostgreSQL Portable
 author: Gareth Flowers
 
 # ----------------------- #
-# Versions
-# ----------------------- #
-
-ver_pgsql: 9.4.4
-ver_perl: 5.16.3
-
-# ----------------------- #
 # Jekyll
 # ----------------------- #
 
 markdown: kramdown
-exclude:  [ Gemfile, Gemfile.lock, README.md, vendor/ ]
+exclude:
+  - Gemfile
+  - Gemfile.lock
+  - README.md
+  - vendor/
 gems:
   - jekyll-sitemap
