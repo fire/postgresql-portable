@@ -4,7 +4,20 @@ layout: default
 
 # PostgreSQL Portable
 
-PostgreSQLPortable is an open source database packaged as a portable app, so you can run a full PostgreSQL database on your iPod, USB flash drive, portable hard drive, etc. It has all the same features as PostgreSQL, plus, it leaves no personal information behind on the machine you run it on, so you can take it with you wherever you go.
+PostgreSQL Portable is an open source database packaged as a portable app, so
+you can run a full PostgreSQL database on your iPod, USB flash drive, portable
+hard drive, etc. It has all the same features as PostgreSQL, plus, it leaves no
+personal information behind on the machine you run it on, so you can take it
+with you wherever you go.
+
+## Features
+* No installation required. Simply download, extract and run!
+* Runs a complete PostgreSQL Server instance.
+* Does not require a local "postgres" user account or administrator privileges,
+  works for any user.
+* Completely portable - runs off a USB, cloud drive (DropBox, iCloud drive,
+  OneDrive, etc.) or hard drive.
+* Packaged in PortableApps.com format for easy integration.
 
 ## System Requirements
 
@@ -13,9 +26,11 @@ PostgreSQLPortable is an open source database packaged as a portable app, so you
 
 ## Credits
 
-* PostgreSQL Portable is a redistribution of the [PostgreSQL Database Server](https://www.postgresql.org/).
+* PostgreSQL Portable is a redistribution of the
+  [PostgreSQL Database Server](https://www.postgresql.org/).
 
 ## Licence
 
 * Portable application code released under [the MIT licence](LICENCE).
-* The PostgreSQL database is released under [the PostgreSQL Licence](http://www.postgresql.org/about/licence/).
+* The PostgreSQL database is released under
+  [the PostgreSQL Licence](http://www.postgresql.org/about/licence/).
